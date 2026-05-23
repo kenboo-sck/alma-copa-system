@@ -1,0 +1,287 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/adminUsers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.isActive == true;
+    }
+
+    function isPublishedEvent(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId))
+        && get(/databases/$(database)/documents/events/$(eventId)).data.status == "published"
+        && (
+          !get(/databases/$(database)/documents/events/$(eventId)).data.keys().hasAny(["deletedAt"])
+          || get(/databases/$(database)/documents/events/$(eventId)).data.deletedAt == null
+        );
+    }
+
+    function eventData(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)).data;
+    }
+
+    function publicEntryPriceAllowed(data) {
+      return data.entryFee is number
+        && data.entryFee > 0
+        && data.priceType in ["early", "regular", "late"]
+        && data.athleteCount is number
+        && data.athleteCount >= 1
+        && data.subtotalAmount == data.entryFee * data.athleteCount
+        && data.discountAmount == 0
+        && data.totalAmount == data.entryFee * data.athleteCount
+        && (
+          (
+            data.priceType == "early"
+            && eventData(data.eventId).earlyBirdPrice == data.entryFee
+            && request.time >= eventData(data.eventId).earlyBirdStartAt
+            && request.time <= eventData(data.eventId).earlyBirdEndAt
+          )
+          || (
+            data.priceType == "regular"
+            && eventData(data.eventId).regularPrice == data.entryFee
+            && request.time >= eventData(data.eventId).regularStartAt
+            && request.time <= eventData(data.eventId).regularEndAt
+          )
+          || (
+            data.priceType == "late"
+            && eventData(data.eventId).latePrice == data.entryFee
+            && request.time >= eventData(data.eventId).lateStartAt
+            && request.time <= eventData(data.eventId).lateEndAt
+          )
+        );
+    }
+
+    function entryKeysAllowed(data) {
+      return data.keys().hasOnly([
+        "eventId",
+        "eventTitle",
+        "entryType",
+        "entryStatus",
+        "paymentStatus",
+        "paymentProvider",
+        "name",
+        "kana",
+        "email",
+        "phone",
+        "gender",
+        "birthDate",
+        "gym",
+        "postalCode",
+        "prefecture",
+        "city",
+        "addressLine",
+        "category",
+        "ageCategory",
+        "weightClass",
+        "openClass",
+        "athlete",
+        "representative",
+        "athletes",
+        "entryFee",
+        "priceType",
+        "athleteCount",
+        "stripeSessionId",
+        "stripeCheckoutSessionId",
+        "stripePaymentIntentId",
+        "receptionStatus",
+        "weighInStatus",
+        "bibNumber",
+        "bracketPosition",
+        "checkedInAt",
+        "weighInAt",
+        "participantCount",
+        "categoryEntryCount",
+        "subtotalAmount",
+        "discountAmount",
+        "totalAmount",
+        "currency",
+        "createdAt",
+        "updatedAt",
+        "paidAt",
+        "paymentFailedAt"
+      ]);
+    }
+
+    function publicEntryRequiredKeys(data) {
+      return data.keys().hasAll([
+        "eventId",
+        "entryType",
+        "name",
+        "kana",
+        "email",
+        "phone",
+        "gender",
+        "paymentStatus",
+        "entryStatus",
+        "postalCode",
+        "prefecture",
+        "city",
+        "addressLine",
+        "category",
+        "ageCategory",
+        "weightClass",
+        "openClass",
+        "entryFee",
+        "priceType",
+        "athleteCount"
+      ]);
+    }
+
+    // 開発テスト用:
+    // 一般ユーザーが entries を作成し、Stripe 決済後に paymentStatus を更新できるようにする。
+    function publicEntryCreateAllowed() {
+      return entryKeysAllowed(request.resource.data)
+        && publicEntryRequiredKeys(request.resource.data)
+        && isPublishedEvent(request.resource.data.eventId)
+        && request.resource.data.eventTitle == get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.title
+        && request.resource.data.eventId is string
+        && request.resource.data.entryType in ["individual", "representative"]
+        && request.resource.data.name is string
+        && request.resource.data.kana is string
+        && request.resource.data.email is string
+        && request.resource.data.phone is string
+        && request.resource.data.gender is string
+        && request.resource.data.birthDate is timestamp
+        && request.resource.data.gym is string
+        && request.resource.data.postalCode is string
+        && request.resource.data.prefecture is string
+        && request.resource.data.city is string
+        && request.resource.data.addressLine is string
+        && request.resource.data.category is string
+        && request.resource.data.ageCategory is string
+        && request.resource.data.weightClass is string
+        && request.resource.data.openClass in ["yes", "no"]
+        && request.resource.data.athleteCount is number
+        && (
+          (
+            request.resource.data.entryType == "individual"
+            && request.resource.data.athleteCount == 1
+            && request.resource.data.athlete is map
+            && request.resource.data.representative == null
+            && request.resource.data.athletes is list
+            && request.resource.data.athletes.size() == 0
+            && request.resource.data.participantCount == 1
+            && request.resource.data.categoryEntryCount == 1
+          )
+          || (
+            request.resource.data.entryType == "representative"
+            && request.resource.data.athleteCount == request.resource.data.athletes.size()
+            && request.resource.data.athlete == null
+            && request.resource.data.representative is map
+            && request.resource.data.athletes is list
+            && request.resource.data.athletes.size() >= 1
+            && request.resource.data.participantCount == request.resource.data.athletes.size()
+            && request.resource.data.categoryEntryCount == request.resource.data.athletes.size()
+          )
+        )
+        && request.resource.data.paymentStatus == "pending"
+        && request.resource.data.entryStatus == "pending_payment"
+        && request.resource.data.paymentProvider == "stripe"
+        && request.resource.data.receptionStatus == "not_checked_in"
+        && request.resource.data.weighInStatus == "not_weighed"
+        && request.resource.data.bibNumber == ""
+        && request.resource.data.bracketPosition == ""
+        && publicEntryPriceAllowed(request.resource.data)
+        && request.resource.data.currency == "JPY";
+    }
+
+    // 開発テスト用:
+    // 決済完了 / キャンセル時の paymentStatus 更新のみ許可する。
+    function publicEntryPaymentUpdateAllowed() {
+      return entryKeysAllowed(request.resource.data)
+        && isPublishedEvent(resource.data.eventId)
+        && request.resource.data.eventId == resource.data.eventId
+        && request.resource.data.eventTitle == resource.data.eventTitle
+        && request.resource.data.entryType == resource.data.entryType
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.kana == resource.data.kana
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.phone == resource.data.phone
+        && request.resource.data.gender == resource.data.gender
+        && request.resource.data.birthDate == resource.data.birthDate
+        && request.resource.data.gym == resource.data.gym
+        && request.resource.data.postalCode == resource.data.postalCode
+        && request.resource.data.prefecture == resource.data.prefecture
+        && request.resource.data.city == resource.data.city
+        && request.resource.data.addressLine == resource.data.addressLine
+        && request.resource.data.category == resource.data.category
+        && request.resource.data.ageCategory == resource.data.ageCategory
+        && request.resource.data.weightClass == resource.data.weightClass
+        && request.resource.data.openClass == resource.data.openClass
+        && request.resource.data.athlete == resource.data.athlete
+        && request.resource.data.representative == resource.data.representative
+        && request.resource.data.athletes == resource.data.athletes
+        && request.resource.data.entryFee == resource.data.entryFee
+        && request.resource.data.priceType == resource.data.priceType
+        && request.resource.data.athleteCount == resource.data.athleteCount
+        && request.resource.data.paymentProvider == resource.data.paymentProvider
+        && request.resource.data.receptionStatus == resource.data.receptionStatus
+        && request.resource.data.weighInStatus == resource.data.weighInStatus
+        && request.resource.data.bibNumber == resource.data.bibNumber
+        && request.resource.data.bracketPosition == resource.data.bracketPosition
+        && request.resource.data.checkedInAt == resource.data.checkedInAt
+        && request.resource.data.weighInAt == resource.data.weighInAt
+        && request.resource.data.participantCount == resource.data.participantCount
+        && request.resource.data.categoryEntryCount == resource.data.categoryEntryCount
+        && request.resource.data.subtotalAmount == resource.data.subtotalAmount
+        && request.resource.data.discountAmount == resource.data.discountAmount
+        && request.resource.data.totalAmount == resource.data.totalAmount
+        && request.resource.data.currency == resource.data.currency
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.paymentStatus in ["paid", "failed"]
+        && (
+          (
+            resource.data.paymentStatus == "pending"
+            && request.resource.data.paymentStatus == "paid"
+            && request.resource.data.entryStatus == "confirmed"
+          )
+          || (
+            resource.data.paymentStatus == "pending"
+            && request.resource.data.paymentStatus == "failed"
+            && request.resource.data.entryStatus == "cancelled"
+          )
+        );
+    }
+
+    function publicEntryUpdateAllowed() {
+      return publicEntryPaymentUpdateAllowed();
+    }
+
+    match /events/{eventId} {
+      allow read: if isAdmin()
+        || (
+          resource.data.status == "published"
+          && (!resource.data.keys().hasAny(["deletedAt"]) || resource.data.deletedAt == null)
+        );
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /eventCategories/{categoryId} {
+      allow read: if isAdmin()
+        || get(/databases/$(database)/documents/events/$(resource.data.eventId)).data.status == "published";
+      allow write: if false;
+    }
+
+    match /entries/{entryId} {
+      allow read: if isAdmin();
+      allow create: if publicEntryCreateAllowed() || isAdmin();
+      allow update: if publicEntryUpdateAllowed() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /adminUsers/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+  }
+}

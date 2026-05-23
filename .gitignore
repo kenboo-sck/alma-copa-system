@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+php-mail-api/vendor/
+php-mail-api/config.php
+php-mail-api/vendor/

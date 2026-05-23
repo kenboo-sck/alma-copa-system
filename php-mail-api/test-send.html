@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ALMA COPA Mail API Test</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #f5f5f5;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(720px, calc(100% - 32px));
+        margin: 48px auto;
+      }
+
+      label {
+        display: block;
+        margin-top: 16px;
+        font-weight: 700;
+      }
+
+      input,
+      textarea,
+      button {
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 8px;
+        border: 1px solid #444;
+        border-radius: 6px;
+        background: #1c1c1c;
+        color: #fff;
+        font: inherit;
+        padding: 12px;
+      }
+
+      button {
+        margin-top: 20px;
+        cursor: pointer;
+        border-color: #d6ad45;
+        background: #d6ad45;
+        color: #111;
+        font-weight: 900;
+      }
+
+      pre {
+        overflow: auto;
+        min-height: 120px;
+        border: 1px solid #333;
+        border-radius: 6px;
+        background: #050505;
+        padding: 16px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>ALMA COPA Mail API Test</h1>
+
+      <form id="form">
+        <label>
+          To
+          <input id="to" type="email" required placeholder="your-address@example.com" />
+        </label>
+
+        <label>
+          Subject
+          <input id="subject" required value="ALMA COPA メールAPIテスト" />
+        </label>
+
+        <label>
+          HTML
+          <textarea id="html" rows="5" required><p>ALMA COPA メールAPIのHTMLテストです。</p></textarea>
+        </label>
+
+        <label>
+          Text
+          <textarea id="text" rows="5" required>ALMA COPA メールAPIのテキストテストです。</textarea>
+        </label>
+
+        <button type="submit">Send Test Email</button>
+      </form>
+
+      <h2>Response</h2>
+      <pre id="output">Not sent yet.</pre>
+    </main>
+
+    <script>
+      const form = document.getElementById("form");
+      const output = document.getElementById("output");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        output.textContent = "Sending...";
+
+        const payload = {
+          to: document.getElementById("to").value,
+          subject: document.getElementById("subject").value,
+          html: document.getElementById("html").value,
+          text: document.getElementById("text").value,
+        };
+
+        try {
+          const response = await fetch("./send-entry-mail.php", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+          const body = await response.json().catch(() => null);
+
+          output.textContent = JSON.stringify(
+            {
+              status: response.status,
+              statusText: response.statusText,
+              body,
+            },
+            null,
+            2,
+          );
+        } catch (error) {
+          output.textContent = String(error);
+        }
+      });
+    </script>
+  </body>
+</html>
