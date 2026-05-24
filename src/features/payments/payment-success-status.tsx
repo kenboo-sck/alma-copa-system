@@ -47,7 +47,7 @@ export function PaymentSuccessStatus({
   entryType,
 }: PaymentSuccessStatusProps) {
   const [message, setMessage] = useState(
-    entryId ? "決済結果を確認しています。" : "決済完了ページを表示しています。",
+    entryId ? "受付内容を確認しています。" : "エントリー受付を完了しました。",
   );
   const emailSentRef = useRef(false);
 
@@ -77,7 +77,7 @@ export function PaymentSuccessStatus({
           hasApplicantEmail: Boolean(applicantEmail),
           alreadySent: emailSentRef.current,
         });
-        return;
+        return false;
       }
 
       const emailCacheKey = `alma-entry-email-sent:${resolvedEntryId}`;
@@ -94,7 +94,7 @@ export function PaymentSuccessStatus({
           applicantEmail,
           apiPath: ENTRY_EMAILS_API_PATH,
         });
-        return;
+        return true;
       }
 
       emailSentRef.current = true;
@@ -142,6 +142,7 @@ export function PaymentSuccessStatus({
             statusText: emailResponse.statusText,
             body: emailResult ?? emailResponseBody,
           });
+          return true;
         } else {
           console.error("Entry emails failed", {
             entryId: resolvedEntryId,
@@ -153,6 +154,7 @@ export function PaymentSuccessStatus({
             statusText: emailResponse.statusText,
             body: emailResult ?? emailResponseBody,
           });
+          return false;
         }
       } catch (emailError) {
         console.error("Entry emails failed", {
@@ -163,6 +165,7 @@ export function PaymentSuccessStatus({
           apiPath: ENTRY_EMAILS_API_PATH,
           error: emailError,
         });
+        return false;
       }
     }
 
@@ -175,9 +178,9 @@ export function PaymentSuccessStatus({
             `/api/payments/checkout-session?session_id=${encodeURIComponent(sessionId)}`,
           );
 
-          sessionData = (await sessionResponse.json().catch(() => null)) as
-            | CheckoutSessionStatusResponse
-            | null;
+          sessionData = (await sessionResponse
+            .json()
+            .catch(() => null)) as CheckoutSessionStatusResponse | null;
 
           if (!sessionResponse.ok) {
             console.warn("Stripe Checkout Session の取得に失敗しました", {
@@ -203,11 +206,7 @@ export function PaymentSuccessStatus({
           });
 
           if (isMounted) {
-            setMessage(
-              sessionId && sessionData?.paymentIntentId
-                ? "決済完了として保存しました。"
-                : "決済完了として保存しました。Stripe詳細の取得はスキップされています。",
-            );
+            setMessage("エントリー受付を確定しています。");
           }
         } catch (paidStatusError) {
           console.error("決済完了状態の保存に失敗しました", {
@@ -217,11 +216,18 @@ export function PaymentSuccessStatus({
           });
 
           if (isMounted) {
-            setMessage("決済は完了しました。エントリー状態の更新は確認中です。");
+            setMessage("決済は完了しています。受付状態を確認しています。");
           }
         }
 
-        await sendEntryEmails(resolvedSessionId);
+        const emailSent = await sendEntryEmails(resolvedSessionId);
+        if (isMounted) {
+          setMessage(
+            emailSent
+              ? "確認メールを送信しました。"
+              : "確認メールの送信状況を確認しています。届かない場合はお問い合わせください。",
+          );
+        }
       } catch (error) {
         console.error("決済完了状態の保存に失敗しました", {
           entryId,
@@ -230,7 +236,7 @@ export function PaymentSuccessStatus({
         });
 
         if (isMounted) {
-          setMessage("決済完了状態の保存に失敗しました。");
+          setMessage("決済は完了しています。受付状態を確認しています。");
         }
       }
     }
@@ -240,7 +246,15 @@ export function PaymentSuccessStatus({
     return () => {
       isMounted = false;
     };
-    }, [applicantEmail, applicantName, entryId, eventId, eventTitle, entryType, sessionId]);
+  }, [
+    applicantEmail,
+    applicantName,
+    entryId,
+    eventId,
+    eventTitle,
+    entryType,
+    sessionId,
+  ]);
 
-  return <p className="mt-3 text-zinc-400">{message}</p>;
+  return <p className="text-sm leading-6 text-zinc-300 sm:text-base">{message}</p>;
 }

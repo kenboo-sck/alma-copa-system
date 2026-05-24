@@ -3,12 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import {
-  ArrowLeftIcon,
-  HomeIcon,
-  MenuIcon,
-  TrophyIcon,
-} from "@/components/icons";
+import { ArrowLeftIcon, HomeIcon, MenuIcon, TrophyIcon } from "@/components/icons";
 
 const navLinks = [
   { label: "TOP", href: "/" },
@@ -44,6 +39,8 @@ function getBreadcrumbs(pathname: string) {
     crumbs.push({ label: "代表者申込", href: pathname });
   } else if (pathname.includes("/confirm")) {
     crumbs.push({ label: "確認", href: pathname });
+  } else if (pathname === "/payment/success" || pathname === "/entry/success") {
+    crumbs.push({ label: "受付完了", href: pathname });
   } else if (pathname.startsWith("/legal")) {
     crumbs.push({ label: "LEGAL", href: pathname });
   } else if (pathname.startsWith("/payment") || pathname.startsWith("/entry/")) {
@@ -56,7 +53,10 @@ function getBreadcrumbs(pathname: string) {
 function getBackLink(pathname: string) {
   const eventId = getEventId(pathname);
 
-  if (pathname.includes("/entry/individual") || pathname.includes("/entry/representative")) {
+  if (
+    pathname.includes("/entry/individual") ||
+    pathname.includes("/entry/representative")
+  ) {
     return { label: "ENTRYへ戻る", href: `/events/${eventId}/entry` };
   }
 
@@ -131,7 +131,10 @@ export function PublicNavigation() {
 
       <div className="relative z-30 mx-auto w-full max-w-[1200px] px-4 pt-20 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-3 border-b border-white/10 pb-3 sm:flex-row sm:items-center sm:justify-between">
-          <nav aria-label="パンくず" className="flex flex-wrap items-center gap-2 text-xs">
+          <nav
+            aria-label="パンくず"
+            className="flex flex-wrap items-center gap-2 text-xs"
+          >
             {breadcrumbs.map((crumb, index) => (
               <span key={`${crumb.href}-${index}`} className="flex items-center gap-2">
                 {index > 0 ? <span className="text-zinc-700">/</span> : null}

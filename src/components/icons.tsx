@@ -175,3 +175,14 @@ export function ClockIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function CheckCircleIcon(props: IconProps) {
+  const { size = 24, ...svgProps } = props;
+
+  return (
+    <svg {...baseProps(size)} {...svgProps}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m8.8 12.2 2.1 2.1 4.6-4.8" />
+    </svg>
+  );
+}

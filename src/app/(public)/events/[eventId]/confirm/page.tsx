@@ -13,9 +13,9 @@ export default async function EntryConfirmPage({ params }: EntryConfirmPageProps
     <section className="mx-auto w-full max-w-4xl space-y-6 px-4 py-10 sm:px-6">
       <div>
         <p className="text-sm font-semibold text-alma-gold">エントリー確認</p>
-        <h1 className="mt-2 text-3xl font-bold text-white">入力確認</h1>
+        <h1 className="mt-2 text-3xl font-bold text-white">エントリー内容確認</h1>
         <p className="mt-3 text-zinc-400">
-          エントリー情報入力後にStripe Checkoutへ進みます。
+          入力内容を確認し、必要に応じてエントリー情報を修正してください。
         </p>
       </div>
       <Link
