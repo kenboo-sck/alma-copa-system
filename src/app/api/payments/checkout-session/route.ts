@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { collections } from "@/lib/firebase/collections";
+import { getAdminFirestore } from "@/lib/firebase/admin";
+import { checkAgeCategory, normalizeEmail } from "@/lib/entries/entry-validation";
 import { paymentService } from "@/lib/payments";
 
 export const runtime = "nodejs";
@@ -52,6 +55,7 @@ const checkoutSessionSchema = z.object({
   currency: z.literal("JPY").default("JPY"),
   itemName: z.string().min(1).max(120).default("ALMA COPA エントリー費"),
   customerEmail: z.email().optional(),
+  normalizedEmail: z.string().max(320).optional(),
   successUrl: z.url().optional(),
   cancelUrl: z.url().optional(),
 });
@@ -76,7 +80,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const session = await paymentService.retrieveCheckoutSession(parsed.data.session_id);
+    const session = await paymentService.retrieveCheckoutSession(
+      parsed.data.session_id,
+    );
 
     return Response.json(session);
   } catch (error) {
@@ -118,6 +124,131 @@ export async function POST(request: Request) {
   }
 
   try {
+    const db = getAdminFirestore();
+    const eventSnapshot = await db
+      .collection(collections.events)
+      .doc(parsed.data.eventId)
+      .get();
+
+    if (!eventSnapshot.exists) {
+      return Response.json(
+        {
+          error: "大会が見つかりません。",
+        },
+        { status: 404 },
+      );
+    }
+
+    const eventData = eventSnapshot.data() as Record<string, unknown>;
+    if (
+      eventData.status !== "published" ||
+      ("deletedAt" in eventData && eventData.deletedAt != null)
+    ) {
+      return Response.json(
+        {
+          error: "この大会は現在公開されていません。",
+        },
+        { status: 400 },
+      );
+    }
+
+    const eventDate = (() => {
+      const value = eventData.eventDate;
+      if (value instanceof Date) {
+        return value;
+      }
+
+      if (
+        value &&
+        typeof value === "object" &&
+        "toDate" in value &&
+        typeof (value as { toDate?: unknown }).toDate === "function"
+      ) {
+        return (value as { toDate: () => Date }).toDate();
+      }
+
+      return null;
+    })();
+
+    if (!eventDate) {
+      return Response.json(
+        {
+          error: "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
+        },
+        { status: 400 },
+      );
+    }
+
+    const applicants =
+      parsed.data.entryType === "representative"
+        ? (parsed.data.athletes ?? [])
+        : [
+            {
+              birthDate: parsed.data.birthDate,
+              ageCategory: parsed.data.ageCategory,
+            },
+          ];
+
+    const ageChecks = applicants.map((applicant) =>
+      checkAgeCategory(applicant, eventDate),
+    );
+
+    if (ageChecks.length === 0) {
+      return Response.json(
+        {
+          error: "選手情報が見つかりません。入力内容をご確認ください。",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (ageChecks.some((check) => !check.isValid)) {
+      return Response.json(
+        {
+          error:
+            "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。年齢カテゴリーをご確認ください。",
+        },
+        { status: 400 },
+      );
+    }
+
+    const normalizedEmail =
+      parsed.data.normalizedEmail ?? normalizeEmail(parsed.data.email);
+
+    const duplicateSnapshot = await db
+      .collection(collections.entries)
+      .where("eventId", "==", parsed.data.eventId)
+      .get();
+
+    const duplicateExists = duplicateSnapshot.docs.some((entryDoc) => {
+      if (entryDoc.id === parsed.data.entryId) {
+        return false;
+      }
+
+      const entryData = entryDoc.data() as {
+        email?: unknown;
+        normalizedEmail?: unknown;
+      };
+      const entryEmail =
+        typeof entryData.normalizedEmail === "string"
+          ? entryData.normalizedEmail
+          : typeof entryData.email === "string"
+            ? normalizeEmail(entryData.email)
+            : "";
+
+      return entryEmail === normalizedEmail;
+    });
+
+    if (duplicateExists) {
+      return Response.json(
+        {
+          error:
+            "このメールアドレスでは、すでにこの大会へエントリー済みです。内容の確認や変更をご希望の場合は、運営までお問い合わせください。",
+        },
+        { status: 409 },
+      );
+    }
+
     const session = await paymentService.createCheckoutSession({
       ...parsed.data,
       successUrl: parsed.data.successUrl ?? undefined,

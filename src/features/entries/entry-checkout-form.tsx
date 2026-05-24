@@ -425,6 +425,26 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  function getValidationApplicants(values: EntryCheckoutValues) {
+    if (entryType === "representative") {
+      return values.athletes.map((athlete) => ({
+        birthDate: athlete.birthDate,
+        ageCategory: athlete.ageCategory,
+      }));
+    }
+
+    return [
+      {
+        birthDate: values.birthDate,
+        ageCategory: values.ageCategory,
+      },
+    ];
+  }
+
+  function getValidationEmail(values: EntryCheckoutValues) {
+    return entryType === "representative" ? values.representativeEmail : values.email;
+  }
+
   async function submitEntry(values: EntryCheckoutValues) {
     if (!event) {
       setError(eventError ?? "大会情報を読み込めませんでした。");
@@ -432,9 +452,43 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     }
 
     setError(null);
-    saveEntryDraft(eventId, entryType, values);
-    setToast("確認ページへ移動します。");
-    window.location.href = `/events/${eventId}/confirm`;
+
+    try {
+      const response = await fetch("/api/entries/validate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          eventId,
+          email: getValidationEmail(values),
+          entryType,
+          applicants: getValidationApplicants(values),
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(
+          data?.error ??
+            "入力内容の確認に失敗しました。しばらくしてからもう一度お試しください。",
+        );
+      }
+
+      saveEntryDraft(eventId, entryType, values);
+      setToast("確認ページへ移動します。");
+      window.location.href = `/events/${eventId}/confirm`;
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : "入力内容の確認に失敗しました。";
+
+      setError(message);
+    }
   }
 
   const entryState = event ? getEntryState(event) : null;

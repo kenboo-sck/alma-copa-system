@@ -22,6 +22,7 @@ import {
 } from "@/components/icons";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import { calculateAgeOnDate, normalizeEmail } from "@/lib/entries/entry-validation";
 import { getSiteUrl } from "@/lib/site-url";
 import {
   getCurrentEntryFee,
@@ -194,6 +195,12 @@ function getApplicantAddressLine(draft: EntryDraft) {
     : draft.values.addressLine;
 }
 
+function getApplicantBirthDate(draft: EntryDraft) {
+  return draft.entryType === "representative"
+    ? (draft.values.athletes[0]?.birthDate ?? "")
+    : draft.values.birthDate;
+}
+
 function getAthletes(draft: EntryDraft) {
   return draft.entryType === "representative" ? draft.values.athletes : [draft.values];
 }
@@ -208,6 +215,47 @@ function getEntryCategories(draft: EntryDraft) {
 
 function formatBirthDate(value: string) {
   return value ? formatDateText(value) : "-";
+}
+
+function formatAge(value: number | null) {
+  return value === null ? "-" : `${value}歳`;
+}
+
+function getApplicantCalculatedAge(draft: EntryDraft, eventDate: Date | null) {
+  if (!eventDate) {
+    return null;
+  }
+
+  const birthDate = getApplicantBirthDate(draft);
+  if (!birthDate) {
+    return null;
+  }
+
+  return calculateAgeOnDate(birthDate, eventDate);
+}
+
+function getAthleteCalculatedAge(birthDate: string, eventDate: Date | null) {
+  if (!eventDate) {
+    return null;
+  }
+
+  return calculateAgeOnDate(birthDate, eventDate);
+}
+
+function buildValidationApplicants(draft: EntryDraft) {
+  if (draft.entryType === "representative") {
+    return draft.values.athletes.map((athlete) => ({
+      birthDate: athlete.birthDate,
+      ageCategory: athlete.ageCategory,
+    }));
+  }
+
+  return [
+    {
+      birthDate: draft.values.birthDate,
+      ageCategory: draft.values.ageCategory,
+    },
+  ];
 }
 
 function SummaryRow({
@@ -302,6 +350,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
   const pricing = event ? getCurrentEntryFee(event) : null;
   const athletes = useMemo(() => (draft ? getAthletes(draft) : []), [draft]);
   const totalAmount = (pricing?.entryFee ?? 0) * Math.max(athletes.length, 1);
+  const eventDate = event?.eventDate ?? null;
   const editHref =
     draft?.entryType === "representative"
       ? `/events/${eventId}/entry/representative`
@@ -342,8 +391,6 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
     const athleteCount = resolvedAthletes.length;
     const pricingNow = getCurrentEntryFee(event);
     const totalAmountNow = pricingNow.entryFee * athleteCount;
-
-    const entryRef = doc(collection(db, collections.entries));
     const athletePayloads = resolvedAthletes.map((athlete) => ({
       name: athlete.name,
       kana: athlete.kana,
@@ -355,10 +402,38 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
       openClass: athlete.openClass,
     }));
 
-    const successUrl = `${getSiteUrl()}/payment/success?entry_id=${entryRef.id}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(applicantName)}&applicant_email=${encodeURIComponent(applicantEmail)}&event_id=${encodeURIComponent(eventId)}&event_title=${encodeURIComponent(event.title)}&entry_type=${encodeURIComponent(draft.entryType)}`;
-    const cancelUrl = `${getSiteUrl()}/payment/cancel?entry_id=${entryRef.id}`;
-
     try {
+      const validationResponse = await fetch("/api/entries/validate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          eventId,
+          email: applicantEmail,
+          entryType: draft.entryType,
+          applicants: buildValidationApplicants(draft),
+        }),
+      });
+
+      const validationData = (await validationResponse.json().catch(() => null)) as {
+        error?: string;
+        normalizedEmail?: string;
+      } | null;
+
+      if (!validationResponse.ok) {
+        throw new Error(
+          validationData?.error ??
+            "入力内容の確認に失敗しました。しばらくしてからもう一度お試しください。",
+        );
+      }
+
+      const normalizedApplicantEmail =
+        validationData?.normalizedEmail ?? normalizeEmail(applicantEmail);
+      const entryRef = doc(collection(db, collections.entries));
+      const successUrl = `${getSiteUrl()}/payment/success?entry_id=${entryRef.id}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(applicantName)}&applicant_email=${encodeURIComponent(applicantEmail)}&event_id=${encodeURIComponent(eventId)}&event_title=${encodeURIComponent(event.title)}&entry_type=${encodeURIComponent(draft.entryType)}`;
+      const cancelUrl = `${getSiteUrl()}/payment/cancel?entry_id=${entryRef.id}`;
+
       await setDoc(entryRef, {
         eventId,
         eventTitle: event.title,
@@ -369,6 +444,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
         name: applicantName,
         kana: isRepresentative ? firstAthlete.kana : values.kana,
         email: applicantEmail,
+        normalizedEmail: normalizedApplicantEmail,
         phone: applicantPhone,
         gender: isRepresentative ? firstAthlete.gender : values.gender,
         birthDate: Timestamp.fromDate(new Date(firstAthlete.birthDate)),
@@ -443,6 +519,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           name: applicantName,
           kana: isRepresentative ? firstAthlete.kana : values.kana,
           email: applicantEmail,
+          normalizedEmail: normalizedApplicantEmail,
           phone: applicantPhone,
           gym: applicantGym,
           gender: isRepresentative ? firstAthlete.gender : values.gender,
@@ -533,6 +610,14 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
         { label: "フリガナ", value: getApplicantKana(draft) },
         { label: "電話番号", value: getApplicantPhone(draft) },
         { label: "申込区分", value: getEntryTypeLabel(draft.entryType) },
+        ...(draft.entryType === "individual"
+          ? [
+              {
+                label: "計算年齢",
+                value: formatAge(getApplicantCalculatedAge(draft, eventDate)),
+              },
+            ]
+          : []),
         { label: "合計金額", value: formatYen(totalAmount) },
       ]
     : [];
@@ -580,6 +665,9 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                   Entry Summary
                 </p>
                 <h2 className="mt-1 text-lg font-bold text-white">確認内容</h2>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  年齢は大会開催日時点で計算しています。
+                </p>
               </div>
               <span className="rounded-full bg-alma-gold px-3 py-1 text-xs font-bold text-black">
                 受付前
@@ -684,6 +772,12 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                               value={formatBirthDate(athlete.birthDate)}
                             />
                             <SummaryRow
+                              label="計算年齢"
+                              value={formatAge(
+                                getAthleteCalculatedAge(athlete.birthDate, eventDate),
+                              )}
+                            />
+                            <SummaryRow
                               label="出場カテゴリー"
                               value={athlete.category}
                               fullWidth
@@ -711,6 +805,12 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                         <SummaryRow
                           label="生年月日"
                           value={formatBirthDate(draft.values.birthDate)}
+                        />
+                        <SummaryRow
+                          label="計算年齢"
+                          value={formatAge(
+                            getAthleteCalculatedAge(draft.values.birthDate, eventDate),
+                          )}
                         />
                         <SummaryRow
                           label="出場カテゴリー"

@@ -43,6 +43,7 @@ export type EntryDocument = {
   name: string;
   kana: string;
   email: string;
+  normalizedEmail?: string;
   phone: string;
   gender: string;
   birthDate: Date;

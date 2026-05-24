@@ -67,6 +67,7 @@ service cloud.firestore {
         "name",
         "kana",
         "email",
+        "normalizedEmail",
         "phone",
         "gender",
         "birthDate",
@@ -114,6 +115,7 @@ service cloud.firestore {
         "name",
         "kana",
         "email",
+        "normalizedEmail",
         "phone",
         "gender",
         "paymentStatus",
@@ -143,6 +145,7 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.kana is string
         && request.resource.data.email is string
+        && request.resource.data.normalizedEmail is string
         && request.resource.data.phone is string
         && request.resource.data.gender is string
         && request.resource.data.birthDate is timestamp
@@ -205,6 +208,7 @@ service cloud.firestore {
         && request.resource.data.name == resource.data.name
         && request.resource.data.kana == resource.data.kana
         && request.resource.data.email == resource.data.email
+        && request.resource.data.normalizedEmail == resource.data.normalizedEmail
         && request.resource.data.phone == resource.data.phone
         && request.resource.data.gender == resource.data.gender
         && request.resource.data.birthDate == resource.data.birthDate
