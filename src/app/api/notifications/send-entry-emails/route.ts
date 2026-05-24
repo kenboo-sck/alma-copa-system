@@ -29,6 +29,10 @@ export async function POST(request: Request) {
   const parsed = sendEntryEmailsSchema.safeParse(json);
 
   if (!parsed.success) {
+    console.warn("Entry email request validation failed", {
+      issues: parsed.error.issues,
+    });
+
     return Response.json(
       {
         error: "メール送信に必要な情報が不足しています。",
@@ -39,9 +43,33 @@ export async function POST(request: Request) {
   }
 
   const status = emailService.getEnvironmentStatus();
+  console.info("Entry email request received", {
+    entryId: parsed.data.entryId,
+    eventId: parsed.data.eventId,
+    eventTitle: parsed.data.eventTitle,
+    entryType: parsed.data.entryType,
+    applicantEmail: parsed.data.applicantEmail,
+    paymentStatus: parsed.data.paymentStatus,
+    sessionId: parsed.data.sessionId ?? null,
+    provider: status.provider,
+    isConfigured: status.isConfigured,
+    missingKeys: status.missingKeys,
+    warnings: status.warnings,
+    phpMailApiUrl: status.phpMailApiUrl,
+  });
+
   if (!status.isConfigured) {
     const isResendApiKeyMissing = status.missingKeys.includes("MAIL_PROVIDER_API_KEY");
     const isPhpMailApiUrlMissing = status.missingKeys.includes("PHP_MAIL_API_URL");
+
+    console.error("Entry email service is not configured", {
+      entryId: parsed.data.entryId,
+      eventId: parsed.data.eventId,
+      provider: status.provider,
+      missingKeys: status.missingKeys,
+      warnings: status.warnings,
+      phpMailApiUrl: status.phpMailApiUrl,
+    });
 
     return Response.json(
       {
@@ -64,6 +92,15 @@ export async function POST(request: Request) {
 
   try {
     const results = await emailService.sendEntryEmails(parsed.data);
+
+    console.info("Entry emails sent successfully", {
+      entryId: parsed.data.entryId,
+      eventId: parsed.data.eventId,
+      eventTitle: parsed.data.eventTitle,
+      provider: status.provider,
+      recipients: results.map((result) => result.recipient),
+      results,
+    });
 
     return Response.json({
       ok: true,

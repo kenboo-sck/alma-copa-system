@@ -59,6 +59,113 @@ export function PaymentSuccessStatus({
     let isMounted = true;
     const resolvedEntryId = entryId;
 
+    async function sendEntryEmails(resolvedSessionId: string) {
+      if (
+        !applicantEmail ||
+        !applicantName ||
+        !eventId ||
+        !eventTitle ||
+        !entryType ||
+        emailSentRef.current
+      ) {
+        console.warn("Entry email API call skipped", {
+          entryId: resolvedEntryId,
+          eventId,
+          eventTitle,
+          entryType,
+          hasApplicantName: Boolean(applicantName),
+          hasApplicantEmail: Boolean(applicantEmail),
+          alreadySent: emailSentRef.current,
+        });
+        return;
+      }
+
+      const emailCacheKey = `alma-entry-email-sent:${resolvedEntryId}`;
+      const alreadySent =
+        typeof window !== "undefined" &&
+        window.sessionStorage.getItem(emailCacheKey) === "1";
+
+      if (alreadySent) {
+        emailSentRef.current = true;
+        console.info("Entry email API call skipped because session cache is set", {
+          entryId: resolvedEntryId,
+          eventId,
+          eventTitle,
+          applicantEmail,
+          apiPath: ENTRY_EMAILS_API_PATH,
+        });
+        return;
+      }
+
+      emailSentRef.current = true;
+
+      try {
+        console.info("Entry email API call started", {
+          entryId: resolvedEntryId,
+          eventId,
+          eventTitle,
+          applicantEmail,
+          apiPath: ENTRY_EMAILS_API_PATH,
+          sessionId: resolvedSessionId,
+        });
+
+        const emailResponse = await fetch(ENTRY_EMAILS_API_PATH, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            entryId: resolvedEntryId,
+            eventId,
+            eventTitle,
+            entryType,
+            applicantName,
+            applicantEmail,
+            paymentStatus: "paid",
+            sessionId: resolvedSessionId,
+          }),
+        });
+        const emailResponseBody = await emailResponse.text().catch(() => "");
+        const emailResult = parseEmailResponseBody(emailResponseBody);
+
+        if (emailResponse.status === 200) {
+          if (typeof window !== "undefined") {
+            window.sessionStorage.setItem(emailCacheKey, "1");
+          }
+          console.info("Entry emails sent", {
+            entryId: resolvedEntryId,
+            eventId,
+            eventTitle,
+            applicantEmail,
+            apiPath: ENTRY_EMAILS_API_PATH,
+            status: emailResponse.status,
+            statusText: emailResponse.statusText,
+            body: emailResult ?? emailResponseBody,
+          });
+        } else {
+          console.error("Entry emails failed", {
+            entryId: resolvedEntryId,
+            eventId,
+            eventTitle,
+            applicantEmail,
+            apiPath: ENTRY_EMAILS_API_PATH,
+            status: emailResponse.status,
+            statusText: emailResponse.statusText,
+            body: emailResult ?? emailResponseBody,
+          });
+        }
+      } catch (emailError) {
+        console.error("Entry emails failed", {
+          entryId: resolvedEntryId,
+          eventId,
+          eventTitle,
+          applicantEmail,
+          apiPath: ENTRY_EMAILS_API_PATH,
+          error: emailError,
+        });
+      }
+    }
+
     async function updatePaidStatus() {
       try {
         let sessionData: CheckoutSessionStatusResponse | null = null;
@@ -84,97 +191,37 @@ export function PaymentSuccessStatus({
         const paymentIntentId = sessionData?.paymentIntentId ?? "";
         const resolvedSessionId = sessionData?.sessionId ?? sessionId ?? "";
 
-        await updateDoc(doc(db, collections.entries, resolvedEntryId), {
-          paymentStatus: "paid",
-          entryStatus: "confirmed",
-          stripeSessionId: resolvedSessionId,
-          stripeCheckoutSessionId: resolvedSessionId,
-          stripePaymentIntentId: paymentIntentId,
-          paidAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        try {
+          await updateDoc(doc(db, collections.entries, resolvedEntryId), {
+            paymentStatus: "paid",
+            entryStatus: "confirmed",
+            stripeSessionId: resolvedSessionId,
+            stripeCheckoutSessionId: resolvedSessionId,
+            stripePaymentIntentId: paymentIntentId,
+            paidAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
 
-        if (isMounted) {
-          setMessage(
-            sessionId && sessionData?.paymentIntentId
-              ? "決済完了として保存しました。"
-              : "決済完了として保存しました。Stripe詳細の取得はスキップされています。",
-          );
-        }
+          if (isMounted) {
+            setMessage(
+              sessionId && sessionData?.paymentIntentId
+                ? "決済完了として保存しました。"
+                : "決済完了として保存しました。Stripe詳細の取得はスキップされています。",
+            );
+          }
+        } catch (paidStatusError) {
+          console.error("決済完了状態の保存に失敗しました", {
+            entryId,
+            sessionId,
+            error: paidStatusError,
+          });
 
-        if (
-          applicantEmail &&
-          applicantName &&
-          eventId &&
-          eventTitle &&
-          entryType &&
-          !emailSentRef.current
-        ) {
-          const emailCacheKey = `alma-entry-email-sent:${resolvedEntryId}`;
-          const alreadySent =
-            typeof window !== "undefined" &&
-            window.sessionStorage.getItem(emailCacheKey) === "1";
-
-          if (!alreadySent) {
-            emailSentRef.current = true;
-
-            try {
-              const emailResponse = await fetch(ENTRY_EMAILS_API_PATH, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  entryId: resolvedEntryId,
-                  eventId,
-                  eventTitle,
-                  entryType,
-                  applicantName,
-                  applicantEmail,
-                  paymentStatus: "paid",
-                  sessionId: resolvedSessionId,
-                }),
-              });
-              const emailResponseBody = await emailResponse.text().catch(() => "");
-              const emailResult = parseEmailResponseBody(emailResponseBody);
-
-              if (emailResponse.status === 200) {
-                if (typeof window !== "undefined") {
-                  window.sessionStorage.setItem(emailCacheKey, "1");
-                }
-                console.info("Entry emails sent", {
-                  entryId: resolvedEntryId,
-                  eventId,
-                  eventTitle,
-                  applicantEmail,
-                  apiPath: ENTRY_EMAILS_API_PATH,
-                  status: emailResponse.status,
-                  statusText: emailResponse.statusText,
-                });
-              } else {
-                console.error("Entry emails failed", {
-                  entryId: resolvedEntryId,
-                  eventId,
-                  eventTitle,
-                  applicantEmail,
-                  apiPath: ENTRY_EMAILS_API_PATH,
-                  status: emailResponse.status,
-                  statusText: emailResponse.statusText,
-                  body: emailResult ?? emailResponseBody,
-                });
-              }
-            } catch (emailError) {
-              console.error("Entry emails failed", {
-                entryId: resolvedEntryId,
-                eventId,
-                eventTitle,
-                applicantEmail,
-                apiPath: ENTRY_EMAILS_API_PATH,
-                error: emailError,
-              });
-            }
+          if (isMounted) {
+            setMessage("決済は完了しました。エントリー状態の更新は確認中です。");
           }
         }
+
+        await sendEntryEmails(resolvedSessionId);
       } catch (error) {
         console.error("決済完了状態の保存に失敗しました", {
           entryId,
