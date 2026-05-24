@@ -670,19 +670,12 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
 
           {validationErrors.length > 0 ? (
             <div className="mt-5 rounded-md border border-amber-700/60 bg-amber-950/70 px-4 py-3 text-sm text-amber-100">
-              <p className="font-bold">入力内容をご確認ください</p>
+              <p className="font-bold">入力内容に不備があります。</p>
               {getValidationStageLabel(validationStage) ? (
                 <p className="mt-1 text-xs text-amber-200/80">
                   検証段階: {getValidationStageLabel(validationStage)}
                 </p>
               ) : null}
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                {Array.from(new Set(validationErrors.map((item) => item.message))).map(
-                  (message) => (
-                    <li key={message}>{message}</li>
-                  ),
-                )}
-              </ul>
             </div>
           ) : null}
         </div>
