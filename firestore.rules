@@ -132,8 +132,7 @@ service cloud.firestore {
       ]);
     }
 
-    // 開発テスト用:
-    // 一般ユーザーが entries を作成し、Stripe 決済後に paymentStatus を更新できるようにする。
+    // 一般ユーザー・未ログインユーザーはエントリー申込の作成のみ許可する。
     function publicEntryCreateAllowed() {
       return entryKeysAllowed(request.resource.data)
         && publicEntryRequiredKeys(request.resource.data)
@@ -186,7 +185,12 @@ service cloud.firestore {
         && request.resource.data.weighInStatus == "not_weighed"
         && request.resource.data.bibNumber == ""
         && request.resource.data.bracketPosition == ""
-        && publicEntryPriceAllowed(request.resource.data)
+        && request.resource.data.entryFee is number
+        && request.resource.data.entryFee > 0
+        && request.resource.data.priceType in ["early", "regular", "late"]
+        && request.resource.data.subtotalAmount == request.resource.data.entryFee * request.resource.data.athleteCount
+        && request.resource.data.discountAmount == 0
+        && request.resource.data.totalAmount == request.resource.data.entryFee * request.resource.data.athleteCount
         && request.resource.data.currency == "JPY";
     }
 
@@ -270,7 +274,7 @@ service cloud.firestore {
     match /entries/{entryId} {
       allow read: if isAdmin();
       allow create: if publicEntryCreateAllowed() || isAdmin();
-      allow update: if publicEntryUpdateAllowed() || isAdmin();
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
