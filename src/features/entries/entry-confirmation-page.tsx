@@ -210,11 +210,29 @@ function formatBirthDate(value: string) {
   return value ? formatDateText(value) : "-";
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
+function SummaryRow({
+  label,
+  value,
+  fullWidth = false,
+  valueClassName = "",
+}: {
+  label: string;
+  value: string;
+  fullWidth?: boolean;
+  valueClassName?: string;
+}) {
   return (
-    <div className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+    <div
+      className={`rounded-md border border-white/10 bg-white/[0.04] p-4 ${
+        fullWidth ? "sm:col-span-2" : ""
+      }`}
+    >
       <p className="text-xs font-semibold text-zinc-500">{label}</p>
-      <p className="mt-2 break-words text-sm font-semibold leading-6 text-white">
+      <p
+        className={`mt-2 text-sm font-semibold leading-6 text-white ${
+          valueClassName || "break-words"
+        }`}
+      >
         {value || "-"}
       </p>
     </div>
@@ -513,60 +531,49 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
     ? [
         { label: "氏名", value: getApplicantName(draft) },
         { label: "フリガナ", value: getApplicantKana(draft) },
-        { label: "メールアドレス", value: getApplicantEmail(draft) },
         { label: "電話番号", value: getApplicantPhone(draft) },
-        { label: "所属", value: getApplicantGym(draft) },
         { label: "申込区分", value: getEntryTypeLabel(draft.entryType) },
-        { label: "出場カテゴリー", value: getEntryCategories(draft) },
         { label: "合計金額", value: formatYen(totalAmount) },
       ]
     : [];
 
+  const applicantEmail = draft ? getApplicantEmail(draft) : "";
+  const applicantGym = draft ? getApplicantGym(draft) : "";
+  const applicantPostalCode = draft ? getApplicantPostalCode(draft) : "";
+  const applicantPrefecture = draft ? getApplicantPrefecture(draft) : "";
+  const applicantCity = draft ? getApplicantCity(draft) : "";
+  const applicantAddressLine = draft ? getApplicantAddressLine(draft) : "";
+  const addressText = draft
+    ? `〒${applicantPostalCode} ${applicantPrefecture}${applicantCity}\n${applicantAddressLine}`
+    : "";
+
   return (
-    <section className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+    <section className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
       <div className="overflow-hidden rounded-lg border border-alma-gold/25 bg-alma-charcoal shadow-2xl shadow-black/40">
         <div className="h-1 bg-alma-gold" />
 
-        <div className="grid gap-8 p-5 sm:p-8 lg:grid-cols-[1.1fr_0.9fr] lg:p-10">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-alma-gold/40 bg-alma-gold/10 px-3 py-1.5 text-xs font-bold text-alma-gold">
-              <CheckCircleIcon size={15} />
-              確認
-            </div>
-            <h1 className="mt-5 text-3xl font-black leading-tight text-white sm:text-5xl">
-              エントリー内容確認
-            </h1>
-            <p className="mt-5 max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base sm:leading-8">
-              入力内容を確認してからStripe決済へ進みます。修正が必要な場合は入力画面へ戻り、この内容で問題なければ決済へ進んでください。
-            </p>
-
-            {error ? (
-              <div className="mt-6 rounded-md border border-red-700/70 bg-red-950/80 px-4 py-3 text-sm text-red-100">
-                {error}
-              </div>
-            ) : null}
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Link
-                href={draft ? editHref : `/events/${eventId}/entry`}
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white transition hover:border-alma-gold hover:bg-alma-gold/10"
-              >
-                <ArrowLeftIcon size={16} />
-                修正する
-              </Link>
-              <button
-                type="button"
-                onClick={() => void proceedToStripe()}
-                disabled={loading || isSubmitting || !draft || !event}
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-alma-gold px-5 py-3 text-sm font-bold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                <TrophyIcon size={16} />
-                {isSubmitting ? "Stripeへ進行中..." : "この内容で決済へ進む"}
-              </button>
-            </div>
+        <div className="border-b border-white/10 bg-black/20 px-5 py-5 sm:px-8 sm:py-6 lg:px-10">
+          <div className="inline-flex items-center gap-2 rounded-full border border-alma-gold/40 bg-alma-gold/10 px-3 py-1.5 text-xs font-bold text-alma-gold">
+            <CheckCircleIcon size={15} />
+            確認
           </div>
+          <h1 className="mt-5 text-3xl font-black leading-tight text-white sm:text-5xl">
+            エントリー内容確認
+          </h1>
+          <p className="mt-4 max-w-4xl text-sm leading-7 text-zinc-300 sm:text-base sm:leading-8">
+            入力内容を確認してからStripe決済へ進みます。修正が必要な場合は入力画面へ戻り、
+            この内容で問題なければ決済へ進んでください。
+          </p>
 
-          <div className="rounded-lg border border-white/10 bg-black/35 p-4 sm:p-5">
+          {error ? (
+            <div className="mt-5 rounded-md border border-red-700/70 bg-red-950/80 px-4 py-3 text-sm text-red-100">
+              {error}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mx-auto w-full max-w-[1100px] p-5 sm:p-8 lg:p-10">
+          <div className="rounded-lg border border-white/10 bg-black/35 p-4 sm:p-5 lg:p-6">
             <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-alma-gold">
@@ -594,6 +601,24 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                       value={item.value}
                     />
                   ))}
+                  <SummaryRow
+                    label="メールアドレス"
+                    value={applicantEmail}
+                    fullWidth
+                    valueClassName="break-all"
+                  />
+                  <SummaryRow
+                    label="所属"
+                    value={applicantGym}
+                    fullWidth
+                    valueClassName="break-words"
+                  />
+                  <SummaryRow
+                    label="出場カテゴリー"
+                    value={getEntryCategories(draft)}
+                    fullWidth
+                    valueClassName="break-words"
+                  />
                 </div>
 
                 <div className="mt-5 rounded-md border border-white/10 bg-white/[0.03] p-4">
@@ -601,12 +626,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                     <UserIcon size={20} className="mt-0.5 shrink-0 text-alma-gold" />
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-zinc-500">住所</p>
-                      <p className="mt-2 text-sm leading-7 text-white">
-                        〒{getApplicantPostalCode(draft)}{" "}
-                        {getApplicantPrefecture(draft)}
-                        {getApplicantCity(draft)}
-                        <br />
-                        {getApplicantAddressLine(draft)}
+                      <p className="mt-2 whitespace-pre-line break-words text-sm leading-7 text-white">
+                        {addressText}
                       </p>
                     </div>
                   </div>
@@ -631,6 +652,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                           <SummaryRow
                             label="代表者メールアドレス"
                             value={draft.values.representativeEmail}
+                            fullWidth
+                            valueClassName="break-all"
                           />
                           <SummaryRow
                             label="代表者電話番号"
@@ -639,6 +662,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                           <SummaryRow
                             label="代表者所属"
                             value={draft.values.representativeGym}
+                            fullWidth
                           />
                         </div>
                       </div>
@@ -662,10 +686,12 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                             <SummaryRow
                               label="出場カテゴリー"
                               value={athlete.category}
+                              fullWidth
                             />
                             <SummaryRow
                               label="年齢カテゴリー"
                               value={athlete.ageCategory}
+                              fullWidth
                             />
                             <SummaryRow label="階級" value={athlete.weightClass} />
                             <SummaryRow
@@ -689,10 +715,12 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                         <SummaryRow
                           label="出場カテゴリー"
                           value={draft.values.category}
+                          fullWidth
                         />
                         <SummaryRow
                           label="年齢カテゴリー"
                           value={draft.values.ageCategory}
+                          fullWidth
                         />
                         <SummaryRow label="階級" value={draft.values.weightClass} />
                         <SummaryRow
@@ -724,6 +752,27 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                         {event.venue || "会場未定"}
                       </p>
                     </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 border-t border-white/10 pt-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
+                    <Link
+                      href={draft ? editHref : `/events/${eventId}/entry`}
+                      className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-white/10 px-4 py-3 text-sm font-bold text-white transition hover:border-alma-gold hover:bg-alma-gold/10 sm:w-auto"
+                    >
+                      <ArrowLeftIcon size={16} />
+                      修正する
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => void proceedToStripe()}
+                      disabled={loading || isSubmitting || !draft || !event}
+                      className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-alma-gold px-6 py-3 text-sm font-bold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
+                    >
+                      <TrophyIcon size={16} />
+                      {isSubmitting ? "Stripeへ進行中..." : "この内容で決済へ進む"}
+                    </button>
                   </div>
                 </div>
               </>
