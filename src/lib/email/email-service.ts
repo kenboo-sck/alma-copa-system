@@ -85,7 +85,9 @@ function getEnvironmentStatus(): EmailEnvironmentStatus {
     warnings.push("MAIL_PROVIDER_API_KEY が短すぎます。");
   }
   if (provider === "resend" && getFromAddress().includes("onboarding@resend.dev")) {
-    warnings.push("MAIL_FROM_ADDRESS が Resend の初期送信元です。独自ドメイン運用では verified domain の from を設定してください。");
+    warnings.push(
+      "MAIL_FROM_ADDRESS が Resend の初期送信元です。独自ドメイン運用では verified domain の from を設定してください。",
+    );
   }
   return {
     isConfigured: missingKeys.length === 0,
@@ -97,34 +99,167 @@ function getEnvironmentStatus(): EmailEnvironmentStatus {
   };
 }
 
+function getEntryTypeLabel(entryType: EntryEmailPayload["entryType"]) {
+  return entryType === "individual" ? "個人エントリー" : "代表者エントリー";
+}
+
 function buildApplicantEmail(payload: EntryEmailPayload) {
   const subject = `【ALMA COPA】エントリー受付完了: ${payload.eventTitle}`;
+  const applicantName = escapeHtml(payload.applicantName);
+  const eventTitle = escapeHtml(payload.eventTitle);
+  const entryTypeLabel = getEntryTypeLabel(payload.entryType);
+  const contactEmail = "info@copa-alma.com";
   const text = [
     `${payload.applicantName} 様`,
     "",
-    "ALMA COPA のエントリー受付が完了しました。",
-    `大会名: ${payload.eventTitle}`,
-    `申込種別: ${payload.entryType === "individual" ? "個人" : "代表者"}`,
-    `決済状態: ${payload.paymentStatus}`,
-    payload.sessionId ? `Stripe Session ID: ${payload.sessionId}` : "",
+    "この度はALMA COPAへエントリーいただき、誠にありがとうございます。",
+    "大会運営にて、以下の内容でエントリーを受付いたしました。",
     "",
-    "引き続き大会運営からの案内をご確認ください。",
+    `大会名: ${payload.eventTitle}`,
+    `申込区分: ${entryTypeLabel}`,
+    "",
+    "今後の流れ",
+    "1. 大会当日に向け、運営より順次ご案内をお送りいたします。",
+    "2. 受付・集合時間・注意事項などは、確定次第メールまたは公式案内にてご連絡いたします。",
+    "3. 当日は時間に余裕をもって会場へお越しください。",
+    "",
+    "ご不明点がございましたらお気軽にお問い合わせください。",
+    `お問い合わせ: ${contactEmail}`,
+    "",
+    "ALMA COPA 運営事務局",
   ]
     .filter(Boolean)
     .join("\n");
 
   const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.7;color:#111827">
-      <p>${escapeHtml(payload.applicantName)} 様</p>
-      <p>ALMA COPA のエントリー受付が完了しました。</p>
-      <ul>
-        <li>大会名: ${escapeHtml(payload.eventTitle)}</li>
-        <li>申込種別: ${payload.entryType === "individual" ? "個人" : "代表者"}</li>
-        <li>決済状態: ${escapeHtml(payload.paymentStatus)}</li>
-        ${payload.sessionId ? `<li>Stripe Session ID: ${escapeHtml(payload.sessionId)}</li>` : ""}
-      </ul>
-      <p>引き続き大会運営からの案内をご確認ください。</p>
-    </div>
+    <!doctype html>
+    <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="x-apple-disable-message-reformatting">
+        <title>${escapeHtml(subject)}</title>
+      </head>
+      <body style="margin:0;padding:0;background-color:#090909;color:#f7f3e8;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+          ALMA COPAへのエントリーを大会運営にて受付いたしました。
+        </div>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin:0;padding:0;background-color:#090909;border-collapse:collapse;">
+          <tr>
+            <td align="center" style="padding:28px 12px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;">
+                <tr>
+                  <td style="padding:0 0 16px 0;text-align:center;">
+                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">ALMA COPA</div>
+                    <div style="margin-top:8px;font-size:12px;line-height:1.5;letter-spacing:2px;color:#8f8776;">TOURNAMENT ENTRY</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color:#111111;border:1px solid #3a2f18;border-radius:14px;overflow:hidden;">
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">
+                      <tr>
+                        <td style="padding:0;background-color:#d6b25e;height:4px;font-size:0;line-height:0;">&nbsp;</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:30px 26px 18px 26px;">
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">
+                            <tr>
+                              <td style="padding:0 0 18px 0;">
+                                <span style="display:inline-block;padding:7px 12px;border-radius:999px;background-color:#2a2110;border:1px solid #d6b25e;color:#f6dc98;font-size:12px;line-height:1;font-weight:700;letter-spacing:1px;">受付完了</span>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding:0;">
+                                <h1 style="margin:0;color:#ffffff;font-size:30px;line-height:1.35;font-weight:700;letter-spacing:0;">エントリーを受付いたしました</h1>
+                                <p style="margin:18px 0 0 0;color:#d9d2c2;font-size:15px;line-height:1.9;">
+                                  ${applicantName} 様<br>
+                                  この度はALMA COPAへエントリーいただき、誠にありがとうございます。大会運営にて、以下の内容でしっかりと受付いたしました。
+                                </p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 26px 24px 26px;">
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;background-color:#171717;border:1px solid #2c2c2c;border-radius:10px;">
+                            <tr>
+                              <td style="padding:18px 18px 8px 18px;color:#d6b25e;font-size:13px;line-height:1.5;font-weight:700;letter-spacing:1px;">ENTRY DETAILS</td>
+                            </tr>
+                            <tr>
+                              <td style="padding:0 18px 18px 18px;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">
+                                  <tr>
+                                    <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#9f9a90;font-size:13px;line-height:1.6;width:34%;">氏名</td>
+                                    <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#ffffff;font-size:15px;line-height:1.6;font-weight:700;">${applicantName}</td>
+                                  </tr>
+                                  <tr>
+                                    <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#9f9a90;font-size:13px;line-height:1.6;width:34%;">大会名</td>
+                                    <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#ffffff;font-size:15px;line-height:1.6;font-weight:700;">${eventTitle}</td>
+                                  </tr>
+                                  <tr>
+                                    <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#9f9a90;font-size:13px;line-height:1.6;width:34%;">申込区分</td>
+                                    <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#ffffff;font-size:15px;line-height:1.6;font-weight:700;">${entryTypeLabel}</td>
+                                  </tr>
+                                </table>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 26px 26px 26px;">
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">
+                            <tr>
+                              <td style="padding:0 0 10px 0;color:#d6b25e;font-size:16px;line-height:1.6;font-weight:700;">今後の流れ</td>
+                            </tr>
+                            <tr>
+                              <td style="padding:0;">
+                                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;">
+                                  <tr>
+                                    <td valign="top" style="padding:10px 0;width:28px;color:#d6b25e;font-size:15px;line-height:1.8;font-weight:700;">1</td>
+                                    <td style="padding:10px 0;color:#d9d2c2;font-size:14px;line-height:1.8;">大会当日に向け、運営より順次ご案内をお送りいたします。</td>
+                                  </tr>
+                                  <tr>
+                                    <td valign="top" style="padding:10px 0;border-top:1px solid #242424;width:28px;color:#d6b25e;font-size:15px;line-height:1.8;font-weight:700;">2</td>
+                                    <td style="padding:10px 0;border-top:1px solid #242424;color:#d9d2c2;font-size:14px;line-height:1.8;">受付・集合時間・注意事項などは、確定次第メールまたは公式案内にてご連絡いたします。</td>
+                                  </tr>
+                                  <tr>
+                                    <td valign="top" style="padding:10px 0;border-top:1px solid #242424;width:28px;color:#d6b25e;font-size:15px;line-height:1.8;font-weight:700;">3</td>
+                                    <td style="padding:10px 0;border-top:1px solid #242424;color:#d9d2c2;font-size:14px;line-height:1.8;">当日は時間に余裕をもって会場へお越しください。</td>
+                                  </tr>
+                                </table>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:0 26px 30px 26px;">
+                          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;background-color:#1b160b;border:1px solid #4a3918;border-radius:10px;">
+                            <tr>
+                              <td style="padding:18px;color:#f2e2ba;font-size:14px;line-height:1.9;">
+                                ご不明点がございましたらお気軽にお問い合わせください。大会当日に向けて、安心してご参加いただけるよう運営一同準備を進めてまいります。
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:18px 8px 0 8px;text-align:center;color:#8f8776;font-size:12px;line-height:1.8;">
+                    お問い合わせ：<a href="mailto:${contactEmail}" style="color:#d6b25e;text-decoration:none;">${contactEmail}</a><br>
+                    ALMA COPA 運営事務局
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
   `;
 
   return { subject, text, html };
@@ -139,7 +274,7 @@ function buildAdminEmail(payload: EntryEmailPayload) {
     `大会名: ${payload.eventTitle}`,
     `申込者: ${payload.applicantName}`,
     `メール: ${payload.applicantEmail}`,
-    `申込種別: ${payload.entryType === "individual" ? "個人" : "代表者"}`,
+    `申込種別: ${getEntryTypeLabel(payload.entryType)}`,
     `決済状態: ${payload.paymentStatus}`,
     payload.sessionId ? `Stripe Session ID: ${payload.sessionId}` : "",
     `Entry ID: ${payload.entryId}`,
@@ -155,7 +290,7 @@ function buildAdminEmail(payload: EntryEmailPayload) {
         <li>大会名: ${escapeHtml(payload.eventTitle)}</li>
         <li>申込者: ${escapeHtml(payload.applicantName)}</li>
         <li>メール: ${escapeHtml(payload.applicantEmail)}</li>
-        <li>申込種別: ${payload.entryType === "individual" ? "個人" : "代表者"}</li>
+        <li>申込種別: ${getEntryTypeLabel(payload.entryType)}</li>
         <li>決済状態: ${escapeHtml(payload.paymentStatus)}</li>
         ${payload.sessionId ? `<li>Stripe Session ID: ${escapeHtml(payload.sessionId)}</li>` : ""}
         <li>Entry ID: ${escapeHtml(payload.entryId)}</li>
@@ -182,7 +317,12 @@ export class EmailProviderError extends Error {
   }
 }
 
-async function sendSingleEmail(to: string, subject: string, text: string, html: string): Promise<EmailSendResult> {
+async function sendSingleEmail(
+  to: string,
+  subject: string,
+  text: string,
+  html: string,
+): Promise<EmailSendResult> {
   const response = await fetch(RESEND_API_URL, {
     method: "POST",
     headers: {
@@ -202,13 +342,17 @@ async function sendSingleEmail(to: string, subject: string, text: string, html: 
   const data = parseJsonBody(bodyText);
 
   if (!response.ok) {
-    throw new EmailProviderError(getBodyString(data, "error") || `Email API request failed with status ${response.status}`, {
-      provider: "resend",
-      status: response.status,
-      statusText: response.statusText,
-      body: data ?? bodyText,
-      recipient: to,
-    });
+    throw new EmailProviderError(
+      getBodyString(data, "error") ||
+        `Email API request failed with status ${response.status}`,
+      {
+        provider: "resend",
+        status: response.status,
+        statusText: response.statusText,
+        body: data ?? bodyText,
+        recipient: to,
+      },
+    );
   }
 
   return {
@@ -219,7 +363,12 @@ async function sendSingleEmail(to: string, subject: string, text: string, html: 
   };
 }
 
-async function sendPhpEmail(to: string, subject: string, text: string, html: string): Promise<EmailSendResult> {
+async function sendPhpEmail(
+  to: string,
+  subject: string,
+  text: string,
+  html: string,
+): Promise<EmailSendResult> {
   const phpMailApiUrl = getPhpMailApiUrl();
   console.info("PHP mail API request started", {
     url: phpMailApiUrl,
@@ -254,13 +403,17 @@ async function sendPhpEmail(to: string, subject: string, text: string, html: str
       bodyText,
     });
 
-    throw new EmailProviderError(getBodyString(data, "error") || `PHP mail API request failed with status ${response.status}`, {
-      provider: "php",
-      status: response.status,
-      statusText: response.statusText,
-      body: data ?? bodyText,
-      recipient: to,
-    });
+    throw new EmailProviderError(
+      getBodyString(data, "error") ||
+        `PHP mail API request failed with status ${response.status}`,
+      {
+        provider: "php",
+        status: response.status,
+        statusText: response.statusText,
+        body: data ?? bodyText,
+        recipient: to,
+      },
+    );
   }
 
   return {
@@ -271,14 +424,23 @@ async function sendPhpEmail(to: string, subject: string, text: string, html: str
   };
 }
 
-async function sendPhpEntryEmails(payload: EntryEmailPayload): Promise<EmailSendResult[]> {
+async function sendPhpEntryEmails(
+  payload: EntryEmailPayload,
+): Promise<EmailSendResult[]> {
   const adminEmail = getAdminEmail();
   const applicant = buildApplicantEmail(payload);
   const admin = buildAdminEmail(payload);
 
   const results: EmailSendResult[] = [];
 
-  results.push(await sendPhpEmail(payload.applicantEmail, applicant.subject, applicant.text, applicant.html));
+  results.push(
+    await sendPhpEmail(
+      payload.applicantEmail,
+      applicant.subject,
+      applicant.text,
+      applicant.html,
+    ),
+  );
   results.push(await sendPhpEmail(adminEmail, admin.subject, admin.text, admin.html));
 
   return results;
@@ -293,7 +455,9 @@ export class EmailService {
     const status = this.getEnvironmentStatus();
 
     if (!status.isConfigured) {
-      throw new Error(`Email service is not configured. Missing: ${status.missingKeys.join(", ")}`);
+      throw new Error(
+        `Email service is not configured. Missing: ${status.missingKeys.join(", ")}`,
+      );
     }
 
     const adminEmail = getAdminEmail();
@@ -310,8 +474,17 @@ export class EmailService {
 
     const results: EmailSendResult[] = [];
 
-    results.push(await sendSingleEmail(payload.applicantEmail, applicant.subject, applicant.text, applicant.html));
-    results.push(await sendSingleEmail(adminEmail, admin.subject, admin.text, admin.html));
+    results.push(
+      await sendSingleEmail(
+        payload.applicantEmail,
+        applicant.subject,
+        applicant.text,
+        applicant.html,
+      ),
+    );
+    results.push(
+      await sendSingleEmail(adminEmail, admin.subject, admin.text, admin.html),
+    );
 
     return results;
   }

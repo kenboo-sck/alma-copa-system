@@ -3,7 +3,7 @@
   "description": "ALMA COPA SMTP mail API for rental server deployment.",
   "type": "project",
   "require": {
-    "php": ">=8.1",
+    "php": ">=7.2",
     "phpmailer/phpmailer": "^6.10"
   }
 }
