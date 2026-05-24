@@ -98,6 +98,14 @@ export async function POST(request: Request) {
   const stripeStatus = paymentService.getStripeEnvironmentStatus();
 
   if (!stripeStatus.isConfigured || !stripeStatus.isTestMode) {
+    console.warn("Stripe test checkout is not configured", {
+      isConfigured: stripeStatus.isConfigured,
+      isTestMode: stripeStatus.isTestMode,
+      missingKeys: stripeStatus.missingKeys,
+      warnings: stripeStatus.warnings,
+      debug: stripeStatus.debug,
+    });
+
     return Response.json(
       {
         error:

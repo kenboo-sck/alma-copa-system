@@ -16,11 +16,31 @@ type CheckoutButtonProps = {
 type CheckoutResponse = {
   url?: string;
   error?: string;
+  stripe?: {
+    isConfigured?: boolean;
+    isTestMode?: boolean;
+    missingKeys?: string[];
+    warnings?: string[];
+    debug?: {
+      testMode?: boolean;
+      secretKeyLooksTest?: boolean;
+    };
+  };
+};
+
+type StripeDebugState = {
+  hasPublishableKey: boolean;
+  testMode?: boolean;
+  isConfigured?: boolean;
+  isTestMode?: boolean;
+  missingKeys?: string[];
+  warnings?: string[];
 };
 
 export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stripeDebug, setStripeDebug] = useState<StripeDebugState | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,12 +54,14 @@ export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) 
 
   async function startCheckout() {
     if (!hasStripePublishableKey) {
+      setStripeDebug({ hasPublishableKey: false });
       setError("Stripe公開キーが未設定です。NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEYを確認してください。");
       return;
     }
 
     setIsLoading(true);
     setError(null);
+    setStripeDebug({ hasPublishableKey: true });
     setToast("Stripe Checkoutを準備しています。");
 
     try {
@@ -59,6 +81,14 @@ export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) 
       const data = (await response.json()) as CheckoutResponse;
 
       if (!response.ok || !data.url) {
+        setStripeDebug({
+          hasPublishableKey: hasStripePublishableKey,
+          testMode: data.stripe?.debug?.testMode,
+          isConfigured: data.stripe?.isConfigured,
+          isTestMode: data.stripe?.isTestMode,
+          missingKeys: data.stripe?.missingKeys,
+          warnings: data.stripe?.warnings,
+        });
         throw new Error(data.error || "決済ページの作成に失敗しました。");
       }
 
@@ -86,6 +116,21 @@ export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) 
       {error ? (
         <div className="mb-4 rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100">
           {error}
+          {stripeDebug ? (
+            <div className="mt-3 border-t border-red-400/20 pt-3 text-xs leading-6 text-red-100/90">
+              <p>Stripe debug</p>
+              <p>hasPublishableKey: {String(stripeDebug.hasPublishableKey)}</p>
+              <p>testMode: {String(stripeDebug.testMode ?? "unknown")}</p>
+              <p>isConfigured: {String(stripeDebug.isConfigured ?? "unknown")}</p>
+              <p>isTestMode: {String(stripeDebug.isTestMode ?? "unknown")}</p>
+              {stripeDebug.missingKeys?.length ? (
+                <p>missingKeys: {stripeDebug.missingKeys.join(", ")}</p>
+              ) : null}
+              {stripeDebug.warnings?.length ? (
+                <p>warnings: {stripeDebug.warnings.join(" / ")}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

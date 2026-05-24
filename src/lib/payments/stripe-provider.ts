@@ -38,6 +38,11 @@ function getStripeEnvironmentStatus(): PaymentEnvironmentStatus {
     isTestMode: testMode && Boolean(secretKey?.startsWith("sk_test_")),
     missingKeys,
     warnings,
+    debug: {
+      hasSecretKey: Boolean(secretKey),
+      secretKeyLooksTest: Boolean(secretKey?.startsWith("sk_test_")),
+      testMode,
+    },
   };
 }
 

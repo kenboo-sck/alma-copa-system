@@ -5,6 +5,11 @@ export type PaymentEnvironmentStatus = {
   isTestMode: boolean;
   missingKeys: string[];
   warnings: string[];
+  debug: {
+    hasSecretKey: boolean;
+    secretKeyLooksTest: boolean;
+    testMode: boolean;
+  };
 };
 
 export type CreateCheckoutSessionInput = {
