@@ -11,6 +11,10 @@ import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import { maskEmail } from "@/lib/entries/entry-validation";
 import {
+  clearEntryFlowStorage,
+  getEntryDraftStorageKey as buildEntryDraftStorageKey,
+} from "@/lib/entries/entry-storage";
+import {
   formatDate,
   formatDateTime,
   getCurrentEntryFee,
@@ -134,8 +138,6 @@ const inputClassName =
 
 const selectClassName = `${inputClassName} appearance-none pr-11`;
 
-const ENTRY_DRAFT_STORAGE_KEY = "alma-entry-draft";
-
 function FormSection({
   eyebrow,
   title,
@@ -174,16 +176,12 @@ type EntryDraft = {
   savedAt: string;
 };
 
-function getEntryDraftStorageKey(eventId: string) {
-  return `${ENTRY_DRAFT_STORAGE_KEY}:${eventId}`;
-}
-
 function readEntryDraft(eventId: string): EntryDraft | null {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const raw = window.sessionStorage.getItem(getEntryDraftStorageKey(eventId));
+  const raw = window.sessionStorage.getItem(buildEntryDraftStorageKey(eventId));
   if (!raw) {
     return null;
   }
@@ -224,7 +222,7 @@ function saveEntryDraft(
   };
 
   window.sessionStorage.setItem(
-    getEntryDraftStorageKey(eventId),
+    buildEntryDraftStorageKey(eventId),
     JSON.stringify(draft),
   );
 }
@@ -256,6 +254,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     fields: athleteFields,
     append: appendAthlete,
     remove: removeAthlete,
+    replace: replaceAthletes,
   } = useFieldArray({
     control,
     name: "athletes",
@@ -444,6 +443,26 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
 
   function getValidationEmail(values: EntryCheckoutValues) {
     return entryType === "representative" ? values.representativeEmail : values.email;
+  }
+
+  function clearEntryForm() {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "入力中の内容をすべて削除します。よろしいですか？",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    clearEntryFlowStorage();
+    reset(defaultValues);
+    replaceAthletes(defaultValues.athletes);
+    setError(null);
+    setToast("入力内容を削除しました。");
   }
 
   async function submitEntry(values: EntryCheckoutValues) {
@@ -1316,7 +1335,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
             )}
 
             <FormSection eyebrow="Confirmation" title="入力内容の確認">
-              <div className="flex flex-col gap-5 rounded-lg border border-alma-gold/25 bg-[linear-gradient(135deg,rgba(214,173,69,0.12),rgba(255,255,255,0.03))] p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-5 rounded-lg border border-alma-gold/25 bg-[linear-gradient(135deg,rgba(214,173,69,0.12),rgba(255,255,255,0.03))] p-5">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.28em] text-alma-gold">
                     Entry Summary
@@ -1342,14 +1361,23 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                     確認ページで内容を見直してから決済します
                   </p>
                 </div>
-                <button
-                  type="submit"
-                  disabled={isLoadingEvent || !event}
-                  className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-md bg-alma-gold px-6 py-3 text-sm font-black text-black shadow-[0_16px_40px_rgba(214,173,69,0.24)] transition hover:bg-[#e0be58] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
-                >
-                  <TrophyIcon size={18} />
-                  入力内容を確認する
-                </button>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={clearEntryForm}
+                    className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-md border border-red-400/35 bg-black/35 px-6 py-3 text-sm font-black text-red-100 transition hover:border-red-300 hover:bg-red-500/10"
+                  >
+                    入力内容をすべてクリア
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoadingEvent || !event}
+                    className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-md bg-alma-gold px-6 py-3 text-sm font-black text-black shadow-[0_16px_40px_rgba(214,173,69,0.24)] transition hover:bg-[#e0be58] disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <TrophyIcon size={18} />
+                    入力内容を確認する
+                  </button>
+                </div>
               </div>
             </FormSection>
           </div>
