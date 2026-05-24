@@ -12,6 +12,13 @@ import {
 } from "@/components/icons";
 import { PublicEventsList } from "@/features/events";
 
+const stripeDebugBuildId = `${process.env.VERCEL_GIT_COMMIT_SHA ?? "local"}:${new Date().toISOString()}`;
+const stripeDebugPublishableKey = Boolean(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+);
+const stripeDebugTestMode =
+  process.env.NEXT_PUBLIC_STRIPE_TEST_MODE?.trim().toLowerCase() === "true";
+
 function FeatureCard({
   icon,
   title,
@@ -37,6 +44,12 @@ function FeatureCard({
 export default function HomePage() {
   return (
     <main className="overflow-x-clip bg-[#050505] text-white">
+      <div className="border-b border-alma-gold/30 bg-black px-4 py-3 font-mono text-xs leading-6 text-alma-gold sm:px-6 lg:px-8">
+        <p className="font-bold">STRIPE DEBUG</p>
+        <p>publishableKey: {stripeDebugPublishableKey ? "YES" : "NO"}</p>
+        <p>testMode: {stripeDebugTestMode ? "YES" : "NO"}</p>
+        <p className="break-all">buildId: {stripeDebugBuildId}</p>
+      </div>
       <SiteHero />
 
       <section className="mx-auto w-full max-w-[1180px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

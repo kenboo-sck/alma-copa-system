@@ -96,25 +96,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const stripeStatus = paymentService.getStripeEnvironmentStatus();
-
-  if (!stripeStatus.isConfigured || !stripeStatus.isTestMode) {
-    console.warn("Stripe test checkout is not configured", {
-      isConfigured: stripeStatus.isConfigured,
-      isTestMode: stripeStatus.isTestMode,
-      missingKeys: stripeStatus.missingKeys,
-      warnings: stripeStatus.warnings,
-      debug: stripeStatus.debug,
-    });
-
-    return Response.json(
-      {
-        error:
-          "Stripeテスト決済が未設定です。テストモードの環境変数を確認してください。",
-        stripe: stripeStatus,
-      },
-      { status: 503 },
-    );
-  }
+  console.info("Stripe checkout environment debug", {
+    isConfigured: stripeStatus.isConfigured,
+    isTestMode: stripeStatus.isTestMode,
+    missingKeys: stripeStatus.missingKeys,
+    warnings: stripeStatus.warnings,
+    debug: stripeStatus.debug,
+  });
 
   const json = await request.json().catch(() => null);
   const parsed = checkoutSessionSchema.safeParse(json);
@@ -154,6 +142,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error: "Stripe Checkout Sessionの作成に失敗しました。",
+        stripe: stripeStatus,
       },
       { status: 500 },
     );
