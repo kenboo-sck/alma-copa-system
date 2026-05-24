@@ -1,29 +1,54 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
 
 type EntryConfirmPageProps = {
   params: Promise<{
     eventId: string;
   }>;
+  searchParams: Promise<{
+    entry_id?: string;
+    session_id?: string;
+    applicant_name?: string;
+    applicant_email?: string;
+    event_title?: string;
+    entry_type?: "individual" | "representative";
+  }>;
 };
 
-export default async function EntryConfirmPage({ params }: EntryConfirmPageProps) {
+export default async function EntryConfirmPage({
+  params,
+  searchParams,
+}: EntryConfirmPageProps) {
   const { eventId } = await params;
+  const {
+    entry_id: entryId,
+    session_id: sessionId,
+    applicant_name: applicantName,
+    applicant_email: applicantEmail,
+    event_title: eventTitle,
+    entry_type: entryType,
+  } = await searchParams;
+  const completionParams = new URLSearchParams();
 
-  return (
-    <section className="mx-auto w-full max-w-4xl space-y-6 px-4 py-10 sm:px-6">
-      <div>
-        <p className="text-sm font-semibold text-alma-gold">エントリー確認</p>
-        <h1 className="mt-2 text-3xl font-bold text-white">エントリー内容確認</h1>
-        <p className="mt-3 text-zinc-400">
-          入力内容を確認し、必要に応じてエントリー情報を修正してください。
-        </p>
-      </div>
-      <Link
-        href={`/events/${eventId}/entry`}
-        className="inline-flex min-h-11 items-center justify-center rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760]"
-      >
-        エントリー入力へ戻る
-      </Link>
-    </section>
-  );
+  completionParams.set("event_id", eventId);
+
+  if (entryId) {
+    completionParams.set("entry_id", entryId);
+  }
+  if (sessionId) {
+    completionParams.set("session_id", sessionId);
+  }
+  if (applicantName) {
+    completionParams.set("applicant_name", applicantName);
+  }
+  if (applicantEmail) {
+    completionParams.set("applicant_email", applicantEmail);
+  }
+  if (eventTitle) {
+    completionParams.set("event_title", eventTitle);
+  }
+  if (entryType) {
+    completionParams.set("entry_type", entryType);
+  }
+
+  redirect(`/payment/success?${completionParams.toString()}`);
 }

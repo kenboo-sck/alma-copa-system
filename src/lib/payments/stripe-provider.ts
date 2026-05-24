@@ -19,8 +19,7 @@ function getEnvValue(name: string) {
 
 function getStripeEnvironmentStatus(): PaymentEnvironmentStatus {
   const secretKey = getEnvValue("STRIPE_SECRET_KEY");
-  const testMode =
-    getEnvValue("NEXT_PUBLIC_STRIPE_TEST_MODE").toLowerCase() === "true";
+  const testMode = getEnvValue("NEXT_PUBLIC_STRIPE_TEST_MODE").toLowerCase() === "true";
 
   const missingKeys = requiredStripeKeys.filter((key) => !getEnvValue(key));
   const warnings: string[] = [];
@@ -74,6 +73,15 @@ export class StripeProvider {
   ): Promise<CheckoutSessionResult> {
     const stripe = this.getClient();
     const baseUrl = getSiteUrl();
+    const fallbackSuccessParams = [
+      `entry_id=${encodeURIComponent(input.entryId)}`,
+      "session_id={CHECKOUT_SESSION_ID}",
+      `event_id=${encodeURIComponent(input.eventId)}`,
+      `event_title=${encodeURIComponent(input.eventTitle)}`,
+      input.entryType ? `entry_type=${encodeURIComponent(input.entryType)}` : null,
+    ]
+      .filter(Boolean)
+      .join("&");
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -81,7 +89,7 @@ export class StripeProvider {
       customer_email: input.customerEmail,
       success_url:
         input.successUrl ??
-        `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+        `${baseUrl}/payment/success?${fallbackSuccessParams.toString()}`,
       cancel_url: input.cancelUrl ?? `${baseUrl}/payment/cancel`,
       line_items: [
         {
@@ -122,9 +130,7 @@ export class StripeProvider {
     };
   }
 
-  async retrieveCheckoutSession(
-    sessionId: string,
-  ): Promise<CheckoutSessionDetails> {
+  async retrieveCheckoutSession(sessionId: string): Promise<CheckoutSessionDetails> {
     const stripe = this.getClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["payment_intent"],
