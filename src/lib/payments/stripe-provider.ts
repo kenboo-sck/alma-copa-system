@@ -13,11 +13,16 @@ import { getSiteUrl } from "@/lib/site-url";
 
 const requiredStripeKeys = ["STRIPE_SECRET_KEY"] as const;
 
-function getStripeEnvironmentStatus(): PaymentEnvironmentStatus {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  const testMode = process.env.NEXT_PUBLIC_STRIPE_TEST_MODE === "true";
+function getEnvValue(name: string) {
+  return process.env[name]?.trim() ?? "";
+}
 
-  const missingKeys = requiredStripeKeys.filter((key) => !process.env[key]);
+function getStripeEnvironmentStatus(): PaymentEnvironmentStatus {
+  const secretKey = getEnvValue("STRIPE_SECRET_KEY");
+  const testMode =
+    getEnvValue("NEXT_PUBLIC_STRIPE_TEST_MODE").toLowerCase() === "true";
+
+  const missingKeys = requiredStripeKeys.filter((key) => !getEnvValue(key));
   const warnings: string[] = [];
 
   if (!testMode) {
@@ -56,7 +61,7 @@ export class StripeProvider {
       throw new Error("Stripe test mode keys are required for this environment.");
     }
 
-    return new Stripe(process.env.STRIPE_SECRET_KEY ?? "");
+    return new Stripe(getEnvValue("STRIPE_SECRET_KEY"));
   }
 
   async createCheckoutSession(
@@ -137,7 +142,7 @@ export class StripeProvider {
     body: string,
     signature: string | null,
   ): StripeWebhookEventResult {
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const webhookSecret = getEnvValue("STRIPE_WEBHOOK_SECRET");
 
     if (!webhookSecret) {
       throw new Error("STRIPE_WEBHOOK_SECRET is not configured.");
