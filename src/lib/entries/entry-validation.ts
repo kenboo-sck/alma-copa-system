@@ -31,6 +31,7 @@ export type EntryValidationStage =
   | "event_date"
   | "age_category_check"
   | "duplicate_email_check"
+  | "server_configuration"
   | "unexpected_error";
 
 export type EntryValidationFieldError = {

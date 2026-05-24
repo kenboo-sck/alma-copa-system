@@ -284,6 +284,8 @@ function getValidationStageLabel(stage: string | null) {
       return "年齢カテゴリー確認";
     case "duplicate_email_check":
       return "メール重複確認";
+    case "server_configuration":
+      return "サーバー設定確認";
     case "unexpected_error":
       return "システム確認";
     default:

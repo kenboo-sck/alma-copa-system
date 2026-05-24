@@ -9,7 +9,7 @@ import {
   type EntryValidationFieldError,
   type EntryValidationFailure,
 } from "@/lib/entries/entry-validation";
-import { getAdminFirestore } from "@/lib/firebase/admin";
+import { getAdminFirestore, isAdminFirestoreConfigured } from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
 import { paymentService } from "@/lib/payments";
 
@@ -159,6 +159,22 @@ function logSchemaFailure(
   });
 }
 
+function buildServerConfigFailure() {
+  return buildFailure(
+    503,
+    "server_configuration",
+    "サーバー側の検証設定が不足しています。FIREBASE_CLIENT_EMAIL と FIREBASE_PRIVATE_KEY を設定してください。",
+    [
+      {
+        field: "form",
+        message:
+          "サーバー側の検証設定が不足しています。FIREBASE_CLIENT_EMAIL と FIREBASE_PRIVATE_KEY を設定してください。",
+        code: "server_configuration_missing",
+      },
+    ],
+  );
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const parsed = checkoutSessionStatusSchema.safeParse({
@@ -234,6 +250,23 @@ export async function POST(request: Request) {
   }
 
   try {
+    if (!isAdminFirestoreConfigured()) {
+      const failure = buildServerConfigFailure();
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(
+        {
+          ...failure,
+          stripe: stripeStatus,
+        },
+        { status: failure.status },
+      );
+    }
+
     const db = getAdminFirestore();
     const eventSnapshot = await db
       .collection(collections.events)
