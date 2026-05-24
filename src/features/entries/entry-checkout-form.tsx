@@ -1,33 +1,14 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  collection,
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-  updateDoc,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState, type ReactNode } from "react";
-import {
-  useFieldArray,
-  useForm,
-  useWatch,
-  type Resolver,
-} from "react-hook-form";
+import { useFieldArray, useForm, useWatch, type Resolver } from "react-hook-form";
 import { z } from "zod";
 
-import {
-  CalendarIcon,
-  ClockIcon,
-  LocationIcon,
-  TrophyIcon,
-} from "@/components/icons";
+import { CalendarIcon, ClockIcon, LocationIcon, TrophyIcon } from "@/components/icons";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
-import { getSiteUrl } from "@/lib/site-url";
 import {
   formatDate,
   formatDateTime,
@@ -39,10 +20,6 @@ import {
   type PublicEvent,
 } from "@/features/events/public-event-utils";
 import type { EntryType } from "@/types/entry";
-
-const hasStripePublishableKey = Boolean(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-);
 
 const athleteSchema = z.object({
   name: z.string().min(1, "氏名を入力してください。").max(50),
@@ -95,32 +72,6 @@ type EntryCheckoutFormProps = {
   entryType: EntryType;
 };
 
-type CheckoutResponse = {
-  entryId?: string;
-  sessionId?: string;
-  url?: string;
-  error?: string;
-  stripe?: {
-    isConfigured?: boolean;
-    isTestMode?: boolean;
-    missingKeys?: string[];
-    warnings?: string[];
-    debug?: {
-      testMode?: boolean;
-      secretKeyLooksTest?: boolean;
-    };
-  };
-};
-
-type StripeDebugState = {
-  hasPublishableKey: boolean;
-  testMode?: boolean;
-  isConfigured?: boolean;
-  isTestMode?: boolean;
-  missingKeys?: string[];
-  warnings?: string[];
-};
-
 const defaultAthleteValues: AthleteValues = {
   name: "",
   kana: "",
@@ -152,11 +103,7 @@ const defaultValues: EntryCheckoutValues = {
   athletes: [defaultAthleteValues],
 };
 
-const categoryOptions = [
-  "エキスパート",
-  "アドバンス",
-  "ビギナー",
-];
+const categoryOptions = ["エキスパート", "アドバンス", "ビギナー"];
 
 const ageCategoryOptions = [
   "キッズ（同じ年齢で試合組みます。）",
@@ -185,6 +132,8 @@ const inputClassName =
   "h-[52px] w-full rounded-md border border-white/10 bg-black/55 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 hover:border-alma-gold/35 focus:border-alma-gold focus:bg-black/70 focus:shadow-[0_0_0_3px_rgba(214,173,69,0.13)]";
 
 const selectClassName = `${inputClassName} appearance-none pr-11`;
+
+const ENTRY_DRAFT_STORAGE_KEY = "alma-entry-draft";
 
 function FormSection({
   eyebrow,
@@ -217,26 +166,73 @@ function SelectArrow() {
   );
 }
 
-function toAthletePayload(athlete: AthleteValues) {
-  return {
-    name: athlete.name,
-    kana: athlete.kana,
-    gender: athlete.gender,
-    birthDate: Timestamp.fromDate(new Date(athlete.birthDate)),
-    category: athlete.category,
-    ageCategory: athlete.ageCategory,
-    weightClass: athlete.weightClass,
-    openClass: athlete.openClass,
+type EntryDraft = {
+  eventId: string;
+  entryType: EntryType;
+  values: EntryCheckoutValues;
+  savedAt: string;
+};
+
+function getEntryDraftStorageKey(eventId: string) {
+  return `${ENTRY_DRAFT_STORAGE_KEY}:${eventId}`;
+}
+
+function readEntryDraft(eventId: string): EntryDraft | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.sessionStorage.getItem(getEntryDraftStorageKey(eventId));
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<EntryDraft> | null;
+
+    if (
+      !parsed ||
+      parsed.eventId !== eventId ||
+      (parsed.entryType !== "individual" && parsed.entryType !== "representative") ||
+      typeof parsed.savedAt !== "string" ||
+      !parsed.values
+    ) {
+      return null;
+    }
+
+    return parsed as EntryDraft;
+  } catch {
+    return null;
+  }
+}
+
+function saveEntryDraft(
+  eventId: string,
+  entryType: EntryType,
+  values: EntryCheckoutValues,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const draft: EntryDraft = {
+    eventId,
+    entryType,
+    values,
+    savedAt: new Date().toISOString(),
   };
+
+  window.sessionStorage.setItem(
+    getEntryDraftStorageKey(eventId),
+    JSON.stringify(draft),
+  );
 }
 
 export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps) {
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [isLoadingEvent, setIsLoadingEvent] = useState(true);
   const [eventError, setEventError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stripeDebug, setStripeDebug] = useState<StripeDebugState | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const {
@@ -244,6 +240,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     handleSubmit,
     control,
     setValue,
+    reset,
     formState: { errors },
   } = useForm<EntryCheckoutValues>({
     resolver: zodResolver(
@@ -324,6 +321,22 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     };
   }, [eventId]);
 
+  useEffect(() => {
+    const draft = readEntryDraft(eventId);
+    if (!draft || draft.entryType !== entryType) {
+      return;
+    }
+
+    reset({
+      ...defaultValues,
+      ...draft.values,
+      athletes:
+        draft.values.athletes?.length > 0
+          ? draft.values.athletes
+          : defaultValues.athletes,
+    });
+  }, [entryType, eventId, reset]);
+
   const individualPostalCode = useWatch({ control, name: "postalCode" }) ?? "";
   const representativePostalCode =
     useWatch({ control, name: "representativePostalCode" }) ?? "";
@@ -376,13 +389,20 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
             .join("");
 
           if (city) {
-            setValue(entryType === "representative" ? "representativeCity" : "city", city, {
-              shouldValidate: true,
-            });
+            setValue(
+              entryType === "representative" ? "representativeCity" : "city",
+              city,
+              {
+                shouldValidate: true,
+              },
+            );
           }
         })
         .catch((caughtError: unknown) => {
-          if (caughtError instanceof DOMException && caughtError.name === "AbortError") {
+          if (
+            caughtError instanceof DOMException &&
+            caughtError.name === "AbortError"
+          ) {
             return;
           }
 
@@ -406,233 +426,15 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
   }, [toast]);
 
   async function submitEntry(values: EntryCheckoutValues) {
-    if (!hasStripePublishableKey) {
-      setStripeDebug({ hasPublishableKey: false });
-      setError("Stripe公開キーが未設定です。NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEYを確認してください。");
-      return;
-    }
-
     if (!event) {
       setError(eventError ?? "大会情報を読み込めませんでした。");
       return;
     }
 
-    setIsSubmitting(true);
     setError(null);
-    setStripeDebug({ hasPublishableKey: true });
-    setToast("エントリー情報を保存しています。");
-
-    const entryRef = doc(collection(db, collections.entries));
-    const pricing = getCurrentEntryFee(event);
-    const isRepresentative = entryType === "representative";
-    const athletes = isRepresentative ? values.athletes : [values];
-    const firstAthlete = athletes[0];
-    const athleteCount = athletes.length;
-    const totalAmount = pricing.entryFee * athleteCount;
-
-    if (!firstAthlete) {
-      setError("選手を1名以上追加してください。");
-      setToast(null);
-      setIsSubmitting(false);
-      return;
-    }
-
-    const invalidBirthDate = athletes.some((athlete) =>
-      Number.isNaN(new Date(athlete.birthDate).getTime()),
-    );
-
-    if (invalidBirthDate) {
-      setError("生年月日の形式が正しくありません。");
-      setToast(null);
-      setIsSubmitting(false);
-      return;
-    }
-
-    const applicantName = isRepresentative
-      ? values.representativeName
-      : values.name;
-    const applicantEmail = isRepresentative
-      ? values.representativeEmail
-      : values.email;
-    const applicantPhone = isRepresentative
-      ? values.representativePhone
-      : values.phone;
-    const applicantGym = isRepresentative ? values.representativeGym : values.gym;
-    const applicantPostalCode = isRepresentative
-      ? values.representativePostalCode
-      : values.postalCode;
-    const applicantPrefecture = isRepresentative
-      ? values.representativePrefecture
-      : values.prefecture;
-    const applicantCity = isRepresentative ? values.representativeCity : values.city;
-    const applicantAddressLine = isRepresentative
-      ? values.representativeAddressLine
-      : values.addressLine;
-    const athletePayloads = athletes.map(toAthletePayload);
-    const individualAthletePayload = toAthletePayload(values);
-    const representativePayload = {
-      name: values.representativeName,
-      email: values.representativeEmail,
-      phone: values.representativePhone,
-      gym: values.representativeGym,
-      postalCode: values.representativePostalCode,
-      prefecture: values.representativePrefecture,
-      city: values.representativeCity,
-      addressLine: values.representativeAddressLine,
-    };
-
-    const baseUrl = getSiteUrl();
-    const successUrl = `${baseUrl}/payment/success?entry_id=${entryRef.id}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(applicantName)}&applicant_email=${encodeURIComponent(applicantEmail)}&event_id=${encodeURIComponent(eventId)}&event_title=${encodeURIComponent(event.title)}&entry_type=${encodeURIComponent(entryType)}`;
-    const cancelUrl = `${baseUrl}/payment/cancel?entry_id=${entryRef.id}`;
-
-    try {
-      await setDoc(entryRef, {
-        eventId,
-        eventTitle: event.title,
-        entryType,
-        entryStatus: "pending_payment",
-        paymentStatus: "pending",
-        paymentProvider: "stripe",
-        name: applicantName,
-        kana: isRepresentative ? firstAthlete.kana : values.kana,
-        email: applicantEmail,
-        phone: applicantPhone,
-        gender: isRepresentative ? firstAthlete.gender : values.gender,
-        birthDate: Timestamp.fromDate(new Date(firstAthlete.birthDate)),
-        gym: applicantGym,
-        postalCode: applicantPostalCode,
-        prefecture: applicantPrefecture,
-        city: applicantCity,
-        addressLine: applicantAddressLine,
-        category: isRepresentative ? firstAthlete.category : values.category,
-        ageCategory: isRepresentative ? firstAthlete.ageCategory : values.ageCategory,
-        weightClass: isRepresentative ? firstAthlete.weightClass : values.weightClass,
-        openClass: isRepresentative ? firstAthlete.openClass : values.openClass,
-        athlete: isRepresentative ? null : individualAthletePayload,
-        representative: isRepresentative ? representativePayload : null,
-        athletes: isRepresentative ? athletePayloads : [],
-        entryFee: pricing.entryFee,
-        priceType: pricing.priceType,
-        athleteCount,
-        receptionStatus: "not_checked_in",
-        weighInStatus: "not_weighed",
-        bibNumber: "",
-        bracketPosition: "",
-        checkedInAt: null,
-        weighInAt: null,
-        participantCount: athleteCount,
-        categoryEntryCount: athleteCount,
-        subtotalAmount: totalAmount,
-        discountAmount: 0,
-        totalAmount,
-        currency: "JPY",
-        stripeSessionId: "",
-        stripeCheckoutSessionId: "",
-        stripePaymentIntentId: "",
-        paymentFailedAt: null,
-        paidAt: null,
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
-
-      const response = await fetch("/api/payments/checkout-session", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          entryId: entryRef.id,
-          eventId,
-          eventTitle: event.title,
-          entryType,
-          name: applicantName,
-          kana: isRepresentative ? firstAthlete.kana : values.kana,
-          email: applicantEmail,
-          phone: applicantPhone,
-          gym: applicantGym,
-          gender: isRepresentative ? firstAthlete.gender : values.gender,
-          birthDate: firstAthlete.birthDate,
-          postalCode: applicantPostalCode,
-          prefecture: applicantPrefecture,
-          city: applicantCity,
-          addressLine: applicantAddressLine,
-          category: isRepresentative ? firstAthlete.category : values.category,
-          ageCategory: isRepresentative ? firstAthlete.ageCategory : values.ageCategory,
-          weightClass: isRepresentative ? firstAthlete.weightClass : values.weightClass,
-          openClass: isRepresentative ? firstAthlete.openClass : values.openClass,
-          representative: isRepresentative ? representativePayload : undefined,
-          athletes: isRepresentative ? values.athletes : undefined,
-          amount: totalAmount,
-          currency: "JPY",
-          itemName: `ALMA COPA エントリー費（${pricing.label} / ${athleteCount}名）`,
-          customerEmail: applicantEmail,
-          successUrl,
-          cancelUrl,
-        }),
-      });
-
-      const data = (await response.json()) as CheckoutResponse;
-
-      if (!response.ok || !data.url || !data.sessionId) {
-        setStripeDebug({
-          hasPublishableKey: hasStripePublishableKey,
-          testMode: data.stripe?.debug?.testMode,
-          isConfigured: data.stripe?.isConfigured,
-          isTestMode: data.stripe?.isTestMode,
-          missingKeys: data.stripe?.missingKeys,
-          warnings: data.stripe?.warnings,
-        });
-        throw new Error(data.error || "決済ページの作成に失敗しました。");
-      }
-
-      await updateDoc(entryRef, {
-        stripeSessionId: data.sessionId,
-        stripeCheckoutSessionId: data.sessionId,
-        updatedAt: serverTimestamp(),
-      }).catch((saveError: unknown) => {
-        console.error("Stripe session ID の保存に失敗しました", {
-          entryId: entryRef.id,
-          saveError,
-        });
-      });
-
-      setToast("Stripe Checkoutへ移動します。");
-      window.location.href = data.url;
-    } catch (caughtError) {
-      const message =
-        caughtError instanceof Error
-          ? caughtError.message
-          : "エントリー保存に失敗しました。";
-
-      console.error("エントリー保存またはStripe Checkout作成に失敗しました", {
-        eventId,
-        eventTitle: event.title,
-        entryType,
-        error: caughtError,
-      });
-
-      await setDoc(
-        entryRef,
-        {
-          eventId,
-          eventTitle: event.title,
-          entryType,
-          entryStatus: "cancelled",
-          paymentStatus: "failed",
-          paymentProvider: "stripe",
-          paymentFailedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
-        },
-        { merge: true },
-      ).catch((saveError: unknown) => {
-        console.error("失敗ステータスの保存に失敗しました", saveError);
-      });
-
-      setError(message);
-      setToast(null);
-      setIsSubmitting(false);
-    }
+    saveEntryDraft(eventId, entryType, values);
+    setToast("確認ページへ移動します。");
+    window.location.href = `/events/${eventId}/confirm`;
   }
 
   const entryState = event ? getEntryState(event) : null;
@@ -684,7 +486,8 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
               {entryTypeLabel}
             </h1>
             <p className="mt-4 max-w-xl text-sm font-semibold leading-7 text-zinc-200 sm:text-base">
-              {entryTypeTitle}。必要事項を入力し、決済へ進みます。
+              {entryTypeTitle}
+              。必要事項を入力し、確認ページで内容を見直してから決済へ進みます。
             </p>
           </div>
         </div>
@@ -703,21 +506,6 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
           {error || eventError ? (
             <div className="mb-5 rounded-md border border-red-700/70 bg-red-950/80 px-4 py-3 text-sm text-red-100">
               {error ?? eventError}
-              {stripeDebug ? (
-                <div className="mt-3 border-t border-red-400/20 pt-3 text-xs leading-6 text-red-100/90">
-                  <p>Stripe debug</p>
-                  <p>hasPublishableKey: {String(stripeDebug.hasPublishableKey)}</p>
-                  <p>testMode: {String(stripeDebug.testMode ?? "unknown")}</p>
-                  <p>isConfigured: {String(stripeDebug.isConfigured ?? "unknown")}</p>
-                  <p>isTestMode: {String(stripeDebug.isTestMode ?? "unknown")}</p>
-                  {stripeDebug.missingKeys?.length ? (
-                    <p>missingKeys: {stripeDebug.missingKeys.join(", ")}</p>
-                  ) : null}
-                  {stripeDebug.warnings?.length ? (
-                    <p>warnings: {stripeDebug.warnings.join(" / ")}</p>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           ) : null}
 
@@ -782,274 +570,308 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
           <div className="space-y-10">
             {entryType === "individual" ? (
               <>
-            <FormSection eyebrow="Basic Info" title="基本情報">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    道場・ジム名
-                  </span>
-                  <input
-                    {...register("gym")}
-                    placeholder="ALMA JIU-JITSU"
-                    className={inputClassName}
-                  />
-                  {errors.gym ? (
-                    <span className="text-xs text-red-300">{errors.gym.message}</span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    氏名（漢字）
-                  </span>
-                  <input
-                    {...register("name")}
-                    placeholder="山田 太郎"
-                    className={inputClassName}
-                  />
-                  {errors.name ? (
-                    <span className="text-xs text-red-300">{errors.name.message}</span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    氏名（カタカナ）
-                  </span>
-                  <input
-                    {...register("kana")}
-                    placeholder="ヤマダ タロウ"
-                    className={inputClassName}
-                  />
-                  {errors.kana ? (
-                    <span className="text-xs text-red-300">{errors.kana.message}</span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    メールアドレス
-                  </span>
-                  <input
-                    type="email"
-                    autoComplete="email"
-                    {...register("email")}
-                    placeholder="entry@example.com"
-                    className={inputClassName}
-                  />
-                  {errors.email ? (
-                    <span className="text-xs text-red-300">{errors.email.message}</span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2 sm:col-span-2">
-                  <span className="text-sm font-semibold text-zinc-200">電話番号</span>
-                  <input
-                    {...register("phone")}
-                    inputMode="tel"
-                    autoComplete="tel"
-                    placeholder="09012345678"
-                    className={inputClassName}
-                  />
-                  {errors.phone ? (
-                    <span className="text-xs text-red-300">{errors.phone.message}</span>
-                  ) : null}
-                </label>
-              </div>
-            </FormSection>
-
-            <FormSection eyebrow="Address" title="住所">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">郵便番号</span>
-                  <input
-                    {...register("postalCode")}
-                    inputMode="numeric"
-                    autoComplete="postal-code"
-                    placeholder="1234567"
-                    className={inputClassName}
-                  />
-                  {errors.postalCode ? (
-                    <span className="text-xs text-red-300">
-                      {errors.postalCode.message}
-                    </span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">都道府県</span>
-                  <input
-                    {...register("prefecture")}
-                    autoComplete="address-level1"
-                    placeholder="東京都"
-                    className={inputClassName}
-                  />
-                  {errors.prefecture ? (
-                    <span className="text-xs text-red-300">
-                      {errors.prefecture.message}
-                    </span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">市区町村</span>
-                  <input
-                    {...register("city")}
-                    autoComplete="address-level2"
-                    placeholder="渋谷区"
-                    className={inputClassName}
-                  />
-                  {errors.city ? (
-                    <span className="text-xs text-red-300">{errors.city.message}</span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    番地・建物名
-                  </span>
-                  <input
-                    {...register("addressLine")}
-                    autoComplete="street-address"
-                    placeholder="神南1-1-1 ALMAビル"
-                    className={inputClassName}
-                  />
-                  {errors.addressLine ? (
-                    <span className="text-xs text-red-300">
-                      {errors.addressLine.message}
-                    </span>
-                  ) : null}
-                </label>
-              </div>
-            </FormSection>
-
-            <FormSection eyebrow="Athlete Info" title="選手情報">
-              <div className="grid gap-5 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">性別</span>
-                  <span className="relative block">
-                    <select {...register("gender")} className={selectClassName}>
-                      <option value="">性別を選択</option>
-                      <option value="male">男性</option>
-                      <option value="female">女性</option>
-                    </select>
-                    <SelectArrow />
-                  </span>
-                  {errors.gender ? (
-                    <span className="text-xs text-red-300">{errors.gender.message}</span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">生年月日</span>
-                  <input
-                    type="date"
-                    {...register("birthDate")}
-                    className={`${inputClassName} scheme-dark`}
-                  />
-                  {errors.birthDate ? (
-                    <span className="text-xs text-red-300">
-                      {errors.birthDate.message}
-                    </span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    カテゴリー
-                  </span>
-                  <span className="relative block">
-                    <select {...register("category")} className={selectClassName}>
-                      <option value="">カテゴリーを選択</option>
-                      {categoryOptions.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectArrow />
-                  </span>
-                  {errors.category ? (
-                    <span className="text-xs text-red-300">
-                      {errors.category.message}
-                    </span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">
-                    年齢カテゴリー
-                  </span>
-                  <span className="relative block">
-                    <select {...register("ageCategory")} className={selectClassName}>
-                      <option value="">年齢カテゴリーを選択</option>
-                      {ageCategoryOptions.map((ageCategory) => (
-                        <option key={ageCategory} value={ageCategory}>
-                          {ageCategory}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectArrow />
-                  </span>
-                  {errors.ageCategory ? (
-                    <span className="text-xs text-red-300">
-                      {errors.ageCategory.message}
-                    </span>
-                  ) : null}
-                </label>
-
-                <label className="space-y-2">
-                  <span className="text-sm font-semibold text-zinc-200">階級</span>
-                  <span className="relative block">
-                    <select {...register("weightClass")} className={selectClassName}>
-                      <option value="">階級を選択</option>
-                      {weightClassOptions.map((weightClass) => (
-                        <option key={weightClass} value={weightClass}>
-                          {weightClass}
-                        </option>
-                      ))}
-                    </select>
-                    <SelectArrow />
-                  </span>
-                  {errors.weightClass ? (
-                    <span className="text-xs text-red-300">
-                      {errors.weightClass.message}
-                    </span>
-                  ) : null}
-                </label>
-
-                <fieldset className="space-y-3 sm:col-span-2">
-                  <legend className="text-sm font-semibold text-zinc-200">
-                    無差別級（オープンクラス）
-                  </legend>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="group flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
-                      <span className="text-sm font-semibold text-white">参加する</span>
+                <FormSection eyebrow="Basic Info" title="基本情報">
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        道場・ジム名
+                      </span>
                       <input
-                        type="radio"
-                        value="yes"
-                        {...register("openClass")}
-                        className="h-4 w-4 accent-alma-gold"
+                        {...register("gym")}
+                        placeholder="ALMA JIU-JITSU"
+                        className={inputClassName}
                       />
+                      {errors.gym ? (
+                        <span className="text-xs text-red-300">
+                          {errors.gym.message}
+                        </span>
+                      ) : null}
                     </label>
-                    <label className="group flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
-                      <span className="text-sm font-semibold text-white">参加しない</span>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        氏名（漢字）
+                      </span>
                       <input
-                        type="radio"
-                        value="no"
-                        {...register("openClass")}
-                        className="h-4 w-4 accent-alma-gold"
+                        {...register("name")}
+                        placeholder="山田 太郎"
+                        className={inputClassName}
                       />
+                      {errors.name ? (
+                        <span className="text-xs text-red-300">
+                          {errors.name.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        氏名（カタカナ）
+                      </span>
+                      <input
+                        {...register("kana")}
+                        placeholder="ヤマダ タロウ"
+                        className={inputClassName}
+                      />
+                      {errors.kana ? (
+                        <span className="text-xs text-red-300">
+                          {errors.kana.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        メールアドレス
+                      </span>
+                      <input
+                        type="email"
+                        autoComplete="email"
+                        {...register("email")}
+                        placeholder="entry@example.com"
+                        className={inputClassName}
+                      />
+                      {errors.email ? (
+                        <span className="text-xs text-red-300">
+                          {errors.email.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2 sm:col-span-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        電話番号
+                      </span>
+                      <input
+                        {...register("phone")}
+                        inputMode="tel"
+                        autoComplete="tel"
+                        placeholder="09012345678"
+                        className={inputClassName}
+                      />
+                      {errors.phone ? (
+                        <span className="text-xs text-red-300">
+                          {errors.phone.message}
+                        </span>
+                      ) : null}
                     </label>
                   </div>
-                  {errors.openClass ? (
-                    <span className="text-xs text-red-300">
-                      {errors.openClass.message}
-                    </span>
-                  ) : null}
-                </fieldset>
-              </div>
-            </FormSection>
+                </FormSection>
+
+                <FormSection eyebrow="Address" title="住所">
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        郵便番号
+                      </span>
+                      <input
+                        {...register("postalCode")}
+                        inputMode="numeric"
+                        autoComplete="postal-code"
+                        placeholder="1234567"
+                        className={inputClassName}
+                      />
+                      {errors.postalCode ? (
+                        <span className="text-xs text-red-300">
+                          {errors.postalCode.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        都道府県
+                      </span>
+                      <input
+                        {...register("prefecture")}
+                        autoComplete="address-level1"
+                        placeholder="東京都"
+                        className={inputClassName}
+                      />
+                      {errors.prefecture ? (
+                        <span className="text-xs text-red-300">
+                          {errors.prefecture.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        市区町村
+                      </span>
+                      <input
+                        {...register("city")}
+                        autoComplete="address-level2"
+                        placeholder="渋谷区"
+                        className={inputClassName}
+                      />
+                      {errors.city ? (
+                        <span className="text-xs text-red-300">
+                          {errors.city.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        番地・建物名
+                      </span>
+                      <input
+                        {...register("addressLine")}
+                        autoComplete="street-address"
+                        placeholder="神南1-1-1 ALMAビル"
+                        className={inputClassName}
+                      />
+                      {errors.addressLine ? (
+                        <span className="text-xs text-red-300">
+                          {errors.addressLine.message}
+                        </span>
+                      ) : null}
+                    </label>
+                  </div>
+                </FormSection>
+
+                <FormSection eyebrow="Athlete Info" title="選手情報">
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">性別</span>
+                      <span className="relative block">
+                        <select {...register("gender")} className={selectClassName}>
+                          <option value="">性別を選択</option>
+                          <option value="male">男性</option>
+                          <option value="female">女性</option>
+                        </select>
+                        <SelectArrow />
+                      </span>
+                      {errors.gender ? (
+                        <span className="text-xs text-red-300">
+                          {errors.gender.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        生年月日
+                      </span>
+                      <input
+                        type="date"
+                        {...register("birthDate")}
+                        className={`${inputClassName} scheme-dark`}
+                      />
+                      {errors.birthDate ? (
+                        <span className="text-xs text-red-300">
+                          {errors.birthDate.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        カテゴリー
+                      </span>
+                      <span className="relative block">
+                        <select {...register("category")} className={selectClassName}>
+                          <option value="">カテゴリーを選択</option>
+                          {categoryOptions.map((category) => (
+                            <option key={category} value={category}>
+                              {category}
+                            </option>
+                          ))}
+                        </select>
+                        <SelectArrow />
+                      </span>
+                      {errors.category ? (
+                        <span className="text-xs text-red-300">
+                          {errors.category.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">
+                        年齢カテゴリー
+                      </span>
+                      <span className="relative block">
+                        <select
+                          {...register("ageCategory")}
+                          className={selectClassName}
+                        >
+                          <option value="">年齢カテゴリーを選択</option>
+                          {ageCategoryOptions.map((ageCategory) => (
+                            <option key={ageCategory} value={ageCategory}>
+                              {ageCategory}
+                            </option>
+                          ))}
+                        </select>
+                        <SelectArrow />
+                      </span>
+                      {errors.ageCategory ? (
+                        <span className="text-xs text-red-300">
+                          {errors.ageCategory.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-2">
+                      <span className="text-sm font-semibold text-zinc-200">階級</span>
+                      <span className="relative block">
+                        <select
+                          {...register("weightClass")}
+                          className={selectClassName}
+                        >
+                          <option value="">階級を選択</option>
+                          {weightClassOptions.map((weightClass) => (
+                            <option key={weightClass} value={weightClass}>
+                              {weightClass}
+                            </option>
+                          ))}
+                        </select>
+                        <SelectArrow />
+                      </span>
+                      {errors.weightClass ? (
+                        <span className="text-xs text-red-300">
+                          {errors.weightClass.message}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <fieldset className="space-y-3 sm:col-span-2">
+                      <legend className="text-sm font-semibold text-zinc-200">
+                        無差別級（オープンクラス）
+                      </legend>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label className="group flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
+                          <span className="text-sm font-semibold text-white">
+                            参加する
+                          </span>
+                          <input
+                            type="radio"
+                            value="yes"
+                            {...register("openClass")}
+                            className="h-4 w-4 accent-alma-gold"
+                          />
+                        </label>
+                        <label className="group flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
+                          <span className="text-sm font-semibold text-white">
+                            参加しない
+                          </span>
+                          <input
+                            type="radio"
+                            value="no"
+                            {...register("openClass")}
+                            className="h-4 w-4 accent-alma-gold"
+                          />
+                        </label>
+                      </div>
+                      {errors.openClass ? (
+                        <span className="text-xs text-red-300">
+                          {errors.openClass.message}
+                        </span>
+                      ) : null}
+                    </fieldset>
+                  </div>
+                </FormSection>
               </>
             ) : (
               <>
@@ -1128,7 +950,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                 <FormSection eyebrow="Team Address" title="住所">
                   <div className="grid gap-5 sm:grid-cols-2">
                     <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">郵便番号</span>
+                      <span className="text-sm font-semibold text-zinc-200">
+                        郵便番号
+                      </span>
                       <input
                         {...register("representativePostalCode")}
                         inputMode="numeric"
@@ -1144,7 +968,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                     </label>
 
                     <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">都道府県</span>
+                      <span className="text-sm font-semibold text-zinc-200">
+                        都道府県
+                      </span>
                       <input
                         {...register("representativePrefecture")}
                         autoComplete="address-level1"
@@ -1159,7 +985,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                     </label>
 
                     <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">市区町村</span>
+                      <span className="text-sm font-semibold text-zinc-200">
+                        市区町村
+                      </span>
                       <input
                         {...register("representativeCity")}
                         autoComplete="address-level2"
@@ -1252,7 +1080,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                           </label>
 
                           <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">性別</span>
+                            <span className="text-sm font-semibold text-zinc-200">
+                              性別
+                            </span>
                             <span className="relative block">
                               <select
                                 {...register(`athletes.${index}.gender`)}
@@ -1338,7 +1168,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                           </label>
 
                           <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">階級</span>
+                            <span className="text-sm font-semibold text-zinc-200">
+                              階級
+                            </span>
                             <span className="relative block">
                               <select
                                 {...register(`athletes.${index}.weightClass`)}
@@ -1410,42 +1242,40 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
               </>
             )}
 
-            <FormSection eyebrow="Checkout" title="決済へ進む">
+            <FormSection eyebrow="Confirmation" title="入力内容の確認">
               <div className="flex flex-col gap-5 rounded-lg border border-alma-gold/25 bg-[linear-gradient(135deg,rgba(214,173,69,0.12),rgba(255,255,255,0.03))] p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-xs font-black uppercase tracking-[0.28em] text-alma-gold">
-                    Entry Fee
+                    Entry Summary
                   </p>
                   {entryType === "representative" ? (
                     <>
-                      <p className="mt-2 text-base font-semibold text-zinc-200">
-                        エントリー費:{" "}
-                        <span className="text-white">
-                          {(currentPricing?.entryFee ?? 0).toLocaleString("ja-JP")}円
-                        </span>{" "}
-                        × {displayAthleteCount}名
-                      </p>
                       <p className="mt-2 text-3xl font-black text-white">
                         合計: {displayTotalAmount.toLocaleString("ja-JP")}円
+                      </p>
+                      <p className="mt-2 text-base font-semibold text-zinc-200">
+                        エントリー費{" "}
+                        {(currentPricing?.entryFee ?? 0).toLocaleString("ja-JP")}円 ×{" "}
+                        {displayAthleteCount}名
                       </p>
                     </>
                   ) : (
                     <p className="mt-2 text-3xl font-black text-white">
-                      エントリー費:{" "}
-                      {(currentPricing?.entryFee ?? 0).toLocaleString("ja-JP")}円
+                      合計: {displayTotalAmount.toLocaleString("ja-JP")}円
                     </p>
                   )}
                   <p className="mt-1 text-sm font-semibold text-zinc-400">
-                    {currentPricing?.label ?? "価格を確認中"}
+                    {currentPricing?.label ?? "価格を確認中"} /
+                    確認ページで内容を見直してから決済します
                   </p>
                 </div>
                 <button
                   type="submit"
-                  disabled={isSubmitting || isLoadingEvent || !event}
+                  disabled={isLoadingEvent || !event}
                   className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-md bg-alma-gold px-6 py-3 text-sm font-black text-black shadow-[0_16px_40px_rgba(214,173,69,0.24)] transition hover:bg-[#e0be58] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
                 >
                   <TrophyIcon size={18} />
-                  {isSubmitting ? "保存中..." : "支払いへ進む"}
+                  入力内容を確認する
                 </button>
               </div>
             </FormSection>

@@ -1,3 +1,4 @@
+import { EntryConfirmationPage } from "@/features/entries/entry-confirmation-page";
 import { redirect } from "next/navigation";
 
 type EntryConfirmPageProps = {
@@ -27,28 +28,32 @@ export default async function EntryConfirmPage({
     event_title: eventTitle,
     entry_type: entryType,
   } = await searchParams;
-  const completionParams = new URLSearchParams();
 
-  completionParams.set("event_id", eventId);
+  if (entryId || sessionId) {
+    const completionParams = new URLSearchParams();
+    completionParams.set("event_id", eventId);
 
-  if (entryId) {
-    completionParams.set("entry_id", entryId);
-  }
-  if (sessionId) {
-    completionParams.set("session_id", sessionId);
-  }
-  if (applicantName) {
-    completionParams.set("applicant_name", applicantName);
-  }
-  if (applicantEmail) {
-    completionParams.set("applicant_email", applicantEmail);
-  }
-  if (eventTitle) {
-    completionParams.set("event_title", eventTitle);
-  }
-  if (entryType) {
-    completionParams.set("entry_type", entryType);
+    if (entryId) {
+      completionParams.set("entry_id", entryId);
+    }
+    if (sessionId) {
+      completionParams.set("session_id", sessionId);
+    }
+    if (applicantName) {
+      completionParams.set("applicant_name", applicantName);
+    }
+    if (applicantEmail) {
+      completionParams.set("applicant_email", applicantEmail);
+    }
+    if (eventTitle) {
+      completionParams.set("event_title", eventTitle);
+    }
+    if (entryType) {
+      completionParams.set("entry_type", entryType);
+    }
+
+    redirect(`/payment/success?${completionParams.toString()}`);
   }
 
-  redirect(`/payment/success?${completionParams.toString()}`);
+  return <EntryConfirmationPage eventId={eventId} />;
 }
