@@ -1,3 +1,5 @@
+import type { ZodIssue } from "zod";
+
 export const AGE_CATEGORY_LABELS = [
   "キッズ（同じ年齢で試合組みます。）",
   "ジュベニウ 15歳から17歳",
@@ -22,8 +24,90 @@ export type AgeCategoryCheckResult = {
   expectedAgeCategory: AgeCategoryLabel | null;
 };
 
+export type EntryValidationStage =
+  | "schema_validation"
+  | "event_lookup"
+  | "event_status"
+  | "event_date"
+  | "age_category_check"
+  | "duplicate_email_check"
+  | "unexpected_error";
+
+export type EntryValidationFieldError = {
+  field: string;
+  message: string;
+  code: string;
+  applicantIndex?: number;
+};
+
+export type SanitizedValidationInput = {
+  eventId: string;
+  entryType: "individual" | "representative";
+  email: string;
+  applicantCount: number;
+  applicants: Array<{
+    birthDate: string;
+    ageCategory: string;
+  }>;
+  entryId?: string;
+};
+
+export type EntryValidationFailure = {
+  ok: false;
+  status: number;
+  stage: EntryValidationStage;
+  message: string;
+  fieldErrors: EntryValidationFieldError[];
+};
+
+export type EntryValidationSuccess = {
+  ok: true;
+  normalizedEmail: string;
+  eventDateIso: string;
+  calculatedAges: Array<number | null>;
+};
+
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+export function maskEmail(email: string) {
+  const normalized = normalizeEmail(email);
+  const [localPart = "", domain = ""] = normalized.split("@");
+
+  if (!domain) {
+    return normalized ? `${normalized.slice(0, 2)}***` : "";
+  }
+
+  const prefix = localPart.slice(0, Math.min(2, localPart.length));
+  return `${prefix}${localPart.length > 2 ? "***" : ""}@${domain}`;
+}
+
+export function sanitizeValidationInput(
+  input: Partial<SanitizedValidationInput> & {
+    email?: string;
+    applicants?: Array<{ birthDate?: string; ageCategory?: string }>;
+  } = {},
+): SanitizedValidationInput {
+  return {
+    eventId: input.eventId ?? "",
+    entryType: input.entryType ?? "individual",
+    email: input.email ? maskEmail(input.email) : "",
+    applicantCount: input.applicants?.length ?? 0,
+    applicants: (input.applicants ?? []).map((applicant) => ({
+      birthDate: applicant.birthDate ?? "",
+      ageCategory: applicant.ageCategory ?? "",
+    })),
+    entryId: input.entryId,
+  };
+}
+
+export function mapZodIssuesToFieldErrors(issues: ZodIssue[]) {
+  return issues.map((issue) => ({
+    field: issue.path.map((part) => String(part)).join("."),
+    message: issue.message,
+    code: issue.code,
+  }));
 }
 
 function parseDateInput(value: string) {
@@ -141,5 +225,48 @@ export function checkAgeCategory(
     isValid: expectedAgeCategory === normalizedAgeCategory,
     calculatedAge,
     expectedAgeCategory,
+  };
+}
+
+export function buildAgeCategoryFieldErrors(
+  applicants: AgeCategoryCheckInput[],
+  referenceDate: Date,
+  entryType: "individual" | "representative",
+) {
+  return applicants.flatMap((applicant, index) => {
+    const result = checkAgeCategory(applicant, referenceDate);
+    if (result.isValid) {
+      return [];
+    }
+
+    const fieldPrefix = entryType === "representative" ? `athletes.${index}` : "";
+
+    return [
+      {
+        field: fieldPrefix ? `${fieldPrefix}.birthDate` : "birthDate",
+        message:
+          "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。",
+        code: "age_category_mismatch",
+        applicantIndex: index,
+      },
+      {
+        field: fieldPrefix ? `${fieldPrefix}.ageCategory` : "ageCategory",
+        message:
+          "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。",
+        code: "age_category_mismatch",
+        applicantIndex: index,
+      },
+    ];
+  });
+}
+
+export function buildDuplicateEmailFieldError(
+  entryType: "individual" | "representative",
+) {
+  return {
+    field: entryType === "representative" ? "representativeEmail" : "email",
+    message:
+      "このメールアドレスでは、すでにこの大会へエントリー済みです。内容の確認や変更をご希望の場合は、運営までお問い合わせください。",
+    code: "duplicate_email",
   };
 }

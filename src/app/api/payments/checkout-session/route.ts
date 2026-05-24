@@ -1,8 +1,16 @@
 import { z } from "zod";
 
-import { collections } from "@/lib/firebase/collections";
+import {
+  buildAgeCategoryFieldErrors,
+  buildDuplicateEmailFieldError,
+  mapZodIssuesToFieldErrors,
+  normalizeEmail,
+  sanitizeValidationInput,
+  type EntryValidationFieldError,
+  type EntryValidationFailure,
+} from "@/lib/entries/entry-validation";
 import { getAdminFirestore } from "@/lib/firebase/admin";
-import { checkAgeCategory, normalizeEmail } from "@/lib/entries/entry-validation";
+import { collections } from "@/lib/firebase/collections";
 import { paymentService } from "@/lib/payments";
 
 export const runtime = "nodejs";
@@ -64,6 +72,93 @@ const checkoutSessionStatusSchema = z.object({
   session_id: z.string().min(1),
 });
 
+type ValidationPayload =
+  | (EntryValidationFailure & { ok: false })
+  | {
+      ok: true;
+      normalizedEmail: string;
+      eventDateIso: string;
+      calculatedAges: Array<number | null>;
+    };
+
+function toDate(value: unknown) {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate();
+  }
+
+  return null;
+}
+
+function buildFailure(
+  status: number,
+  stage: EntryValidationFailure["stage"],
+  message: string,
+  fieldErrors: EntryValidationFieldError[],
+): EntryValidationFailure {
+  return {
+    ok: false,
+    status,
+    stage,
+    message,
+    fieldErrors,
+  };
+}
+
+function logValidationFailure(
+  stage: EntryValidationFailure["stage"],
+  message: string,
+  input: ReturnType<typeof sanitizeValidationInput>,
+  fieldErrors: EntryValidationFieldError[],
+  error?: unknown,
+) {
+  console.error("Stripe Checkout validation failed", {
+    stage,
+    message,
+    validationResult: {
+      ok: false,
+      stage,
+      message,
+      fieldErrors,
+    },
+    formData: input,
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : (error ?? null),
+  });
+}
+
+function logSchemaFailure(
+  message: string,
+  input: ReturnType<typeof sanitizeValidationInput>,
+  issues: ReturnType<typeof mapZodIssuesToFieldErrors>,
+) {
+  console.error("Stripe Checkout validation failed", {
+    stage: "schema_validation",
+    message,
+    validationResult: {
+      ok: false,
+      stage: "schema_validation",
+      message,
+      fieldErrors: issues,
+    },
+    formData: input,
+  });
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const parsed = checkoutSessionStatusSchema.safeParse({
@@ -112,15 +207,30 @@ export async function POST(request: Request) {
 
   const json = await request.json().catch(() => null);
   const parsed = checkoutSessionSchema.safeParse(json);
+  const rawInput = sanitizeValidationInput({
+    eventId: typeof json?.eventId === "string" ? json.eventId : "",
+    entryType: json?.entryType === "representative" ? "representative" : "individual",
+    email: typeof json?.email === "string" ? json.email : "",
+    applicants: Array.isArray(json?.athletes)
+      ? json.athletes
+      : json?.birthDate
+        ? [{ birthDate: json.birthDate, ageCategory: json.ageCategory ?? "" }]
+        : [],
+    entryId: typeof json?.entryId === "string" ? json.entryId : undefined,
+  });
 
   if (!parsed.success) {
-    return Response.json(
-      {
-        error: "入力内容に不備があります。必須項目を確認してください。",
-        issues: parsed.error.issues,
-      },
-      { status: 400 },
-    );
+    const fieldErrors = mapZodIssuesToFieldErrors(parsed.error.issues);
+    const message = fieldErrors.some((item) => item.field === "email")
+      ? "メールアドレスの形式が正しくありません。"
+      : fieldErrors.some((item) => item.field.includes("birthDate"))
+        ? "生年月日が未入力です。"
+        : "入力内容に不備があります。必須項目を確認してください。";
+
+    logSchemaFailure(message, rawInput, fieldErrors);
+
+    const failure = buildFailure(400, "schema_validation", message, fieldErrors);
+    return Response.json(failure, { status: failure.status });
   }
 
   try {
@@ -131,12 +241,21 @@ export async function POST(request: Request) {
       .get();
 
     if (!eventSnapshot.exists) {
-      return Response.json(
+      const failure = buildFailure(404, "event_lookup", "大会が見つかりません。", [
         {
-          error: "大会が見つかりません。",
+          field: "eventId",
+          message: "大会が見つかりません。",
+          code: "event_not_found",
         },
-        { status: 404 },
+      ]);
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
       );
+      return Response.json(failure, { status: failure.status });
     }
 
     const eventData = eventSnapshot.data() as Record<string, unknown>;
@@ -144,39 +263,51 @@ export async function POST(request: Request) {
       eventData.status !== "published" ||
       ("deletedAt" in eventData && eventData.deletedAt != null)
     ) {
-      return Response.json(
-        {
-          error: "この大会は現在公開されていません。",
-        },
-        { status: 400 },
+      const failure = buildFailure(
+        400,
+        "event_status",
+        "この大会は現在公開されていません。",
+        [
+          {
+            field: "eventId",
+            message: "この大会は現在公開されていません。",
+            code: "event_not_published",
+          },
+        ],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
-    const eventDate = (() => {
-      const value = eventData.eventDate;
-      if (value instanceof Date) {
-        return value;
-      }
-
-      if (
-        value &&
-        typeof value === "object" &&
-        "toDate" in value &&
-        typeof (value as { toDate?: unknown }).toDate === "function"
-      ) {
-        return (value as { toDate: () => Date }).toDate();
-      }
-
-      return null;
-    })();
-
+    const eventDate = toDate(eventData.eventDate);
     if (!eventDate) {
-      return Response.json(
-        {
-          error: "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
-        },
-        { status: 400 },
+      const failure = buildFailure(
+        400,
+        "event_date",
+        "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
+        [
+          {
+            field: "eventDate",
+            message:
+              "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
+            code: "event_date_missing",
+          },
+        ],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
     const applicants =
@@ -189,27 +320,50 @@ export async function POST(request: Request) {
             },
           ];
 
-    const ageChecks = applicants.map((applicant) =>
-      checkAgeCategory(applicant, eventDate),
-    );
-
-    if (ageChecks.length === 0) {
-      return Response.json(
-        {
-          error: "選手情報が見つかりません。入力内容をご確認ください。",
-        },
-        { status: 400 },
+    if (applicants.length === 0) {
+      const failure = buildFailure(
+        400,
+        "age_category_check",
+        "選手情報が見つかりません。入力内容をご確認ください。",
+        [
+          {
+            field: "birthDate",
+            message: "選手情報が見つかりません。入力内容をご確認ください。",
+            code: "applicant_missing",
+          },
+        ],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
-    if (ageChecks.some((check) => !check.isValid)) {
-      return Response.json(
-        {
-          error:
-            "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。年齢カテゴリーをご確認ください。",
-        },
-        { status: 400 },
+    const ageFieldErrors = buildAgeCategoryFieldErrors(
+      applicants,
+      eventDate,
+      parsed.data.entryType,
+    );
+
+    if (ageFieldErrors.length > 0) {
+      const failure = buildFailure(
+        400,
+        "age_category_check",
+        "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。年齢カテゴリーをご確認ください。",
+        ageFieldErrors,
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
     const normalizedEmail =
@@ -240,42 +394,88 @@ export async function POST(request: Request) {
     });
 
     if (duplicateExists) {
-      return Response.json(
-        {
-          error:
-            "このメールアドレスでは、すでにこの大会へエントリー済みです。内容の確認や変更をご希望の場合は、運営までお問い合わせください。",
-        },
-        { status: 409 },
+      const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
+      const failure = buildFailure(
+        409,
+        "duplicate_email_check",
+        duplicateError.message,
+        [duplicateError],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
-    const session = await paymentService.createCheckoutSession({
-      ...parsed.data,
-      successUrl: parsed.data.successUrl ?? undefined,
-      cancelUrl: parsed.data.cancelUrl ?? undefined,
-      customerEmail: parsed.data.customerEmail ?? parsed.data.email,
-    });
+    const success: ValidationPayload = {
+      ok: true,
+      normalizedEmail,
+      eventDateIso: eventDate.toISOString(),
+      calculatedAges: applicants.map((applicant) =>
+        sanitizeCalculatedAge(applicant.birthDate, eventDate),
+      ),
+    };
 
-    return Response.json({
-      entryId: parsed.data.entryId,
-      sessionId: session.sessionId,
-      url: session.url,
-      provider: session.provider,
-    });
+    return Response.json(success);
   } catch (error) {
-    console.error("Stripe Checkout Session creation failed", {
+    const failure = buildFailure(
+      500,
+      "unexpected_error",
+      "Stripe Checkout Sessionの作成に失敗しました。",
+      [
+        {
+          field: "form",
+          message: "Stripe Checkout Sessionの作成に失敗しました。",
+          code: "stripe_checkout_failed",
+        },
+      ],
+    );
+
+    logValidationFailure(
+      failure.stage,
+      failure.message,
+      rawInput,
+      failure.fieldErrors,
       error,
-      eventId: parsed.data.eventId,
-      eventTitle: parsed.data.eventTitle,
-      entryId: parsed.data.entryId,
-    });
+    );
 
     return Response.json(
       {
-        error: "Stripe Checkout Sessionの作成に失敗しました。",
+        ...failure,
         stripe: stripeStatus,
       },
-      { status: 500 },
+      { status: failure.status },
     );
   }
+}
+
+function sanitizeCalculatedAge(birthDate: string, eventDate: Date) {
+  const parts = birthDate.split("-").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+    return null;
+  }
+
+  const [year, month, day] = parts;
+  const birth = new Date(year, month - 1, day);
+  if (
+    birth.getFullYear() !== year ||
+    birth.getMonth() !== month - 1 ||
+    birth.getDate() !== day
+  ) {
+    return null;
+  }
+
+  let age = eventDate.getFullYear() - birth.getFullYear();
+  if (
+    eventDate.getMonth() < birth.getMonth() ||
+    (eventDate.getMonth() === birth.getMonth() && eventDate.getDate() < birth.getDate())
+  ) {
+    age -= 1;
+  }
+
+  return age >= 0 ? age : null;
 }

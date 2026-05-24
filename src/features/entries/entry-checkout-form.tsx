@@ -9,6 +9,7 @@ import { z } from "zod";
 import { CalendarIcon, ClockIcon, LocationIcon, TrophyIcon } from "@/components/icons";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import { maskEmail } from "@/lib/entries/entry-validation";
 import {
   formatDate,
   formatDateTime,
@@ -469,11 +470,29 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
 
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        message?: string;
+        stage?: string;
+        fieldErrors?: { field: string; message: string; code: string }[];
       } | null;
 
       if (!response.ok) {
+        console.error("Entry validation failed before confirmation page", {
+          stage: data?.stage ?? "unknown",
+          message: data?.message ?? data?.error ?? "入力内容の確認に失敗しました。",
+          validationResult: data,
+          formData: {
+            eventId,
+            entryType,
+            applicantEmail:
+              entryType === "representative"
+                ? maskEmail(values.representativeEmail)
+                : maskEmail(values.email),
+            applicantCount: entryType === "representative" ? values.athletes.length : 1,
+          },
+        });
         throw new Error(
-          data?.error ??
+          data?.message ??
+            data?.error ??
             "入力内容の確認に失敗しました。しばらくしてからもう一度お試しください。",
         );
       }

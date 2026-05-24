@@ -1,22 +1,35 @@
 import { z } from "zod";
 
+import {
+  buildAgeCategoryFieldErrors,
+  buildDuplicateEmailFieldError,
+  mapZodIssuesToFieldErrors,
+  normalizeEmail,
+  sanitizeValidationInput,
+  type EntryValidationFieldError,
+  type EntryValidationFailure,
+  type EntryValidationSuccess,
+} from "@/lib/entries/entry-validation";
 import { getAdminFirestore } from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
-import { checkAgeCategory, normalizeEmail } from "@/lib/entries/entry-validation";
 
 export const runtime = "nodejs";
 
 const validationApplicantSchema = z.object({
-  birthDate: z.string().min(1),
-  ageCategory: z.string().min(1),
+  birthDate: z.string().min(1, "生年月日を入力してください。"),
+  ageCategory: z.string().min(1, "年齢カテゴリーを選択してください。"),
 });
 
 const validationSchema = z.object({
-  eventId: z.string().min(1),
-  email: z.email(),
+  eventId: z.string().min(1, "大会を選択してください。"),
+  email: z.email("メールアドレスの形式が正しくありません。"),
   entryType: z.enum(["individual", "representative"]),
-  applicants: z.array(validationApplicantSchema).min(1),
+  applicants: z.array(validationApplicantSchema).min(1, "選手情報を入力してください。"),
 });
+
+type ValidationPayload =
+  | (EntryValidationSuccess & { ok: true })
+  | EntryValidationFailure;
 
 function isPublishedEvent(data: Record<string, unknown>) {
   return (
@@ -41,17 +54,76 @@ function toDate(value: unknown) {
   return null;
 }
 
+function buildFailure(
+  status: number,
+  stage: EntryValidationFailure["stage"],
+  message: string,
+  fieldErrors: EntryValidationFieldError[],
+): EntryValidationFailure {
+  return {
+    ok: false,
+    status,
+    stage,
+    message,
+    fieldErrors,
+  };
+}
+
+function logValidationFailure(
+  stage: EntryValidationFailure["stage"],
+  message: string,
+  input: ReturnType<typeof sanitizeValidationInput>,
+  fieldErrors: EntryValidationFieldError[],
+  error?: unknown,
+) {
+  console.error("Entry validation failed", {
+    stage,
+    message,
+    validationResult: {
+      ok: false,
+      stage,
+      message,
+      fieldErrors,
+    },
+    formData: input,
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : (error ?? null),
+  });
+}
+
 export async function POST(request: Request) {
   const json = await request.json().catch(() => null);
   const parsed = validationSchema.safeParse(json);
+  const rawInput = sanitizeValidationInput({
+    eventId: typeof json?.eventId === "string" ? json.eventId : "",
+    entryType: json?.entryType === "representative" ? "representative" : "individual",
+    email: typeof json?.email === "string" ? json.email : "",
+    applicants: Array.isArray(json?.applicants) ? json.applicants : [],
+    entryId: typeof json?.entryId === "string" ? json.entryId : undefined,
+  });
 
   if (!parsed.success) {
-    return Response.json(
-      {
-        error: "入力内容に不備があります。必須項目を確認してください。",
-      },
-      { status: 400 },
+    const fieldErrors = mapZodIssuesToFieldErrors(parsed.error.issues);
+    const failure = buildFailure(
+      400,
+      "schema_validation",
+      fieldErrors.some((item) => item.field === "email")
+        ? "メールアドレスの形式が正しくありません。"
+        : fieldErrors.some((item) => item.field.includes("birthDate"))
+          ? "生年月日が未入力です。"
+          : "入力内容に不備があります。必須項目を確認してください。",
+      fieldErrors,
     );
+
+    logValidationFailure(failure.stage, failure.message, rawInput, fieldErrors);
+
+    return Response.json(failure, { status: failure.status });
   }
 
   try {
@@ -62,55 +134,98 @@ export async function POST(request: Request) {
       .get();
 
     if (!eventSnapshot.exists) {
-      return Response.json(
+      const failure = buildFailure(404, "event_lookup", "大会が見つかりません。", [
         {
-          error: "大会が見つかりません。",
+          field: "eventId",
+          message: "大会が見つかりません。",
+          code: "event_not_found",
         },
-        { status: 404 },
+      ]);
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
       );
+      return Response.json(failure, { status: failure.status });
     }
 
     const eventData = eventSnapshot.data() as Record<string, unknown>;
     if (!isPublishedEvent(eventData)) {
-      return Response.json(
-        {
-          error: "この大会は現在公開されていません。",
-        },
-        { status: 400 },
+      const failure = buildFailure(
+        400,
+        "event_status",
+        "この大会は現在公開されていません。",
+        [
+          {
+            field: "eventId",
+            message: "この大会は現在公開されていません。",
+            code: "event_not_published",
+          },
+        ],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
     const eventDate = toDate(eventData.eventDate);
     if (!eventDate) {
-      return Response.json(
-        {
-          error: "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
-        },
-        { status: 400 },
+      const failure = buildFailure(
+        400,
+        "event_date",
+        "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
+        [
+          {
+            field: "eventDate",
+            message:
+              "大会開催日が設定されていないため、年齢カテゴリーを確認できません。",
+            code: "event_date_missing",
+          },
+        ],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
-    const ageChecks = parsed.data.applicants.map((applicant) =>
-      checkAgeCategory(applicant, eventDate),
+    const applicants = parsed.data.applicants.map((applicant) => ({
+      birthDate: applicant.birthDate,
+      ageCategory: applicant.ageCategory,
+    }));
+
+    const ageFieldErrors = buildAgeCategoryFieldErrors(
+      applicants,
+      eventDate,
+      parsed.data.entryType,
     );
 
-    if (ageChecks.length === 0) {
-      return Response.json(
-        {
-          error: "選手情報が見つかりません。入力内容をご確認ください。",
-        },
-        { status: 400 },
+    if (ageFieldErrors.length > 0) {
+      const failure = buildFailure(
+        400,
+        "age_category_check",
+        "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。年齢カテゴリーをご確認ください。",
+        ageFieldErrors,
       );
-    }
 
-    if (ageChecks.some((check) => !check.isValid)) {
-      return Response.json(
-        {
-          error:
-            "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。年齢カテゴリーをご確認ください。",
-        },
-        { status: 400 },
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
       );
+      return Response.json(failure, { status: failure.status });
     }
 
     const normalizedEmail = normalizeEmail(parsed.data.email);
@@ -135,33 +250,84 @@ export async function POST(request: Request) {
     });
 
     if (duplicateExists) {
-      return Response.json(
-        {
-          error:
-            "このメールアドレスでは、すでにこの大会へエントリー済みです。内容の確認や変更をご希望の場合は、運営までお問い合わせください。",
-        },
-        { status: 409 },
+      const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
+      const failure = buildFailure(
+        409,
+        "duplicate_email_check",
+        duplicateError.message,
+        [duplicateError],
       );
+
+      logValidationFailure(
+        failure.stage,
+        failure.message,
+        rawInput,
+        failure.fieldErrors,
+      );
+      return Response.json(failure, { status: failure.status });
     }
 
-    return Response.json({
+    const success: ValidationPayload = {
       ok: true,
       normalizedEmail,
-      eventDate: eventDate.toISOString(),
-      calculatedAges: ageChecks.map((check) => check.calculatedAge),
-    });
-  } catch (error) {
-    console.error("Entry validation failed", {
-      error,
-      eventId: parsed.data.eventId,
-      email: parsed.data.email,
-    });
+      eventDateIso: eventDate.toISOString(),
+      calculatedAges: applicants.map((applicant) =>
+        applicant.birthDate
+          ? sanitizeCalculatedAge(applicant.birthDate, eventDate)
+          : null,
+      ),
+    };
 
-    return Response.json(
-      {
-        error: "入力内容の検証に失敗しました。",
-      },
-      { status: 500 },
+    return Response.json(success);
+  } catch (error) {
+    const failure = buildFailure(
+      500,
+      "unexpected_error",
+      "入力内容の検証に失敗しました。",
+      [
+        {
+          field: "form",
+          message: "入力内容の検証に失敗しました。",
+          code: "unexpected_error",
+        },
+      ],
     );
+
+    logValidationFailure(
+      failure.stage,
+      failure.message,
+      rawInput,
+      failure.fieldErrors,
+      error,
+    );
+
+    return Response.json(failure, { status: failure.status });
   }
+}
+
+function sanitizeCalculatedAge(birthDate: string, eventDate: Date) {
+  const parts = birthDate.split("-").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+    return null;
+  }
+
+  const [year, month, day] = parts;
+  const birth = new Date(year, month - 1, day);
+  if (
+    birth.getFullYear() !== year ||
+    birth.getMonth() !== month - 1 ||
+    birth.getDate() !== day
+  ) {
+    return null;
+  }
+
+  let age = eventDate.getFullYear() - birth.getFullYear();
+  if (
+    eventDate.getMonth() < birth.getMonth() ||
+    (eventDate.getMonth() === birth.getMonth() && eventDate.getDate() < birth.getDate())
+  ) {
+    age -= 1;
+  }
+
+  return age >= 0 ? age : null;
 }

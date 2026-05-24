@@ -22,7 +22,12 @@ import {
 } from "@/components/icons";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
-import { calculateAgeOnDate, normalizeEmail } from "@/lib/entries/entry-validation";
+import {
+  calculateAgeOnDate,
+  type EntryValidationFieldError,
+  maskEmail,
+  normalizeEmail,
+} from "@/lib/entries/entry-validation";
 import { getSiteUrl } from "@/lib/site-url";
 import {
   getCurrentEntryFee,
@@ -258,16 +263,46 @@ function buildValidationApplicants(draft: EntryDraft) {
   ];
 }
 
+function getValidationErrorMessage(
+  errors: EntryValidationFieldError[],
+  fields: string[],
+) {
+  return errors.find((error) => fields.includes(error.field))?.message ?? "";
+}
+
+function getValidationStageLabel(stage: string | null) {
+  switch (stage) {
+    case "schema_validation":
+      return "入力形式の確認";
+    case "event_lookup":
+      return "大会データ確認";
+    case "event_status":
+      return "公開状態確認";
+    case "event_date":
+      return "開催日確認";
+    case "age_category_check":
+      return "年齢カテゴリー確認";
+    case "duplicate_email_check":
+      return "メール重複確認";
+    case "unexpected_error":
+      return "システム確認";
+    default:
+      return null;
+  }
+}
+
 function SummaryRow({
   label,
   value,
   fullWidth = false,
   valueClassName = "",
+  error = "",
 }: {
   label: string;
   value: string;
   fullWidth?: boolean;
   valueClassName?: string;
+  error?: string;
 }) {
   return (
     <div
@@ -275,7 +310,11 @@ function SummaryRow({
         fullWidth ? "sm:col-span-2" : ""
       }`}
     >
-      <p className="text-xs font-semibold text-zinc-500">{label}</p>
+      <p
+        className={`text-xs font-semibold ${error ? "text-red-300" : "text-zinc-500"}`}
+      >
+        {label}
+      </p>
       <p
         className={`mt-2 text-sm font-semibold leading-6 text-white ${
           valueClassName || "break-words"
@@ -283,6 +322,7 @@ function SummaryRow({
       >
         {value || "-"}
       </p>
+      {error ? <p className="mt-2 text-xs leading-5 text-red-300">{error}</p> : null}
     </div>
   );
 }
@@ -292,6 +332,10 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
   const [event, setEvent] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [validationStage, setValidationStage] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<EntryValidationFieldError[]>(
+    [],
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -300,6 +344,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
     async function loadData() {
       setLoading(true);
       setError(null);
+      setValidationStage(null);
+      setValidationErrors([]);
 
       try {
         const storedDraft = readDraft(eventId);
@@ -332,6 +378,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           setDraft(null);
           setEvent(null);
           setError(message);
+          setValidationStage(null);
+          setValidationErrors([]);
         }
       } finally {
         if (isMounted) {
@@ -379,6 +427,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
 
     setIsSubmitting(true);
     setError(null);
+    setValidationStage(null);
+    setValidationErrors([]);
 
     const applicantName = getApplicantName(draft);
     const applicantEmail = getApplicantEmail(draft);
@@ -419,11 +469,31 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
       const validationData = (await validationResponse.json().catch(() => null)) as {
         error?: string;
         normalizedEmail?: string;
+        stage?: string;
+        message?: string;
+        fieldErrors?: EntryValidationFieldError[];
       } | null;
 
       if (!validationResponse.ok) {
+        setValidationStage(validationData?.stage ?? "schema_validation");
+        setValidationErrors(validationData?.fieldErrors ?? []);
+        console.error("Entry validation failed before Stripe", {
+          stage: validationData?.stage ?? "unknown",
+          message:
+            validationData?.message ??
+            validationData?.error ??
+            "入力内容の確認に失敗しました。",
+          validationResult: validationData,
+          formData: {
+            eventId,
+            entryType: draft.entryType,
+            applicantEmail: maskEmail(applicantEmail),
+            applicantCount: athleteCount,
+          },
+        });
         throw new Error(
-          validationData?.error ??
+          validationData?.message ??
+            validationData?.error ??
             "入力内容の確認に失敗しました。しばらくしてからもう一度お試しください。",
         );
       }
@@ -556,6 +626,9 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
 
       const data = (await response.json()) as {
         error?: string;
+        stage?: string;
+        message?: string;
+        fieldErrors?: EntryValidationFieldError[];
         url?: string;
         sessionId?: string;
         stripe?: {
@@ -570,7 +643,24 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
       };
 
       if (!response.ok || !data.url || !data.sessionId) {
-        throw new Error(data.error || "決済ページの作成に失敗しました。");
+        setValidationStage(data.stage ?? "unexpected_error");
+        if (data.fieldErrors) {
+          setValidationErrors(data.fieldErrors);
+        }
+        console.error("Checkout session creation failed after validation", {
+          stage: data.stage ?? "unexpected_error",
+          message: data.message ?? data.error ?? "決済ページの作成に失敗しました。",
+          validationResult: data,
+          formData: {
+            eventId,
+            entryType: draft.entryType,
+            applicantEmail: maskEmail(applicantEmail),
+            applicantCount: athleteCount,
+          },
+        });
+        throw new Error(
+          data.message ?? data.error ?? "決済ページの作成に失敗しました。",
+        );
       }
 
       await updateDoc(entryRef, {
@@ -631,6 +721,28 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
   const addressText = draft
     ? `〒${applicantPostalCode} ${applicantPrefecture}${applicantCity}\n${applicantAddressLine}`
     : "";
+  const applicantEmailError = draft
+    ? getValidationErrorMessage(
+        validationErrors,
+        draft.entryType === "representative"
+          ? ["representativeEmail", "email"]
+          : ["email"],
+      )
+    : "";
+  const applicantBirthDateError = draft
+    ? getValidationErrorMessage(
+        validationErrors,
+        draft.entryType === "representative" ? ["athletes.0.birthDate"] : ["birthDate"],
+      )
+    : "";
+  const applicantAgeCategoryError = draft
+    ? getValidationErrorMessage(
+        validationErrors,
+        draft.entryType === "representative"
+          ? ["athletes.0.ageCategory"]
+          : ["ageCategory"],
+      )
+    : "";
 
   return (
     <section className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
@@ -653,6 +765,24 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           {error ? (
             <div className="mt-5 rounded-md border border-red-700/70 bg-red-950/80 px-4 py-3 text-sm text-red-100">
               {error}
+            </div>
+          ) : null}
+
+          {validationErrors.length > 0 ? (
+            <div className="mt-5 rounded-md border border-amber-700/60 bg-amber-950/70 px-4 py-3 text-sm text-amber-100">
+              <p className="font-bold">入力内容をご確認ください</p>
+              {getValidationStageLabel(validationStage) ? (
+                <p className="mt-1 text-xs text-amber-200/80">
+                  検証段階: {getValidationStageLabel(validationStage)}
+                </p>
+              ) : null}
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {Array.from(new Set(validationErrors.map((item) => item.message))).map(
+                  (message) => (
+                    <li key={message}>{message}</li>
+                  ),
+                )}
+              </ul>
             </div>
           ) : null}
         </div>
@@ -687,6 +817,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                       key={item.label}
                       label={item.label}
                       value={item.value}
+                      error={item.label === "計算年齢" ? applicantAgeCategoryError : ""}
                     />
                   ))}
                   <SummaryRow
@@ -694,6 +825,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                     value={applicantEmail}
                     fullWidth
                     valueClassName="break-all"
+                    error={applicantEmailError}
                   />
                   <SummaryRow
                     label="所属"
@@ -770,12 +902,18 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                             <SummaryRow
                               label="生年月日"
                               value={formatBirthDate(athlete.birthDate)}
+                              error={getValidationErrorMessage(validationErrors, [
+                                `athletes.${index}.birthDate`,
+                              ])}
                             />
                             <SummaryRow
                               label="計算年齢"
                               value={formatAge(
                                 getAthleteCalculatedAge(athlete.birthDate, eventDate),
                               )}
+                              error={getValidationErrorMessage(validationErrors, [
+                                `athletes.${index}.ageCategory`,
+                              ])}
                             />
                             <SummaryRow
                               label="出場カテゴリー"
@@ -786,6 +924,9 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                               label="年齢カテゴリー"
                               value={athlete.ageCategory}
                               fullWidth
+                              error={getValidationErrorMessage(validationErrors, [
+                                `athletes.${index}.ageCategory`,
+                              ])}
                             />
                             <SummaryRow label="階級" value={athlete.weightClass} />
                             <SummaryRow
@@ -805,12 +946,14 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                         <SummaryRow
                           label="生年月日"
                           value={formatBirthDate(draft.values.birthDate)}
+                          error={applicantBirthDateError}
                         />
                         <SummaryRow
                           label="計算年齢"
                           value={formatAge(
                             getAthleteCalculatedAge(draft.values.birthDate, eventDate),
                           )}
+                          error={applicantAgeCategoryError}
                         />
                         <SummaryRow
                           label="出場カテゴリー"
@@ -821,6 +964,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                           label="年齢カテゴリー"
                           value={draft.values.ageCategory}
                           fullWidth
+                          error={applicantAgeCategoryError}
                         />
                         <SummaryRow label="階級" value={draft.values.weightClass} />
                         <SummaryRow
