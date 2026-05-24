@@ -44,14 +44,6 @@ Stripe Checkout、Firestore 保存、決済前の重複チェック、完了メ�
 - `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
 - `NEXT_PUBLIC_FIREBASE_APP_ID`
 
-### Firebase Admin 側
-
-- `FIREBASE_PROJECT_ID`
-- `FIREBASE_CLIENT_EMAIL`
-- `FIREBASE_PRIVATE_KEY`
-
-`FIREBASE_PRIVATE_KEY` は Vercel 上では改行が `\n` 形式で保存されるため、コード側で `replace(/\\n/g, "\n")` して復元しています。
-
 ### Stripe
 
 - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
@@ -66,6 +58,11 @@ Stripe Checkout、Firestore 保存、決済前の重複チェック、完了メ�
 - `MAIL_PROVIDER_API_KEY`
 - `ADMIN_NOTIFICATION_EMAIL`
 - `MAIL_FROM_ADDRESS`
+
+### 補足
+
+決済前の重複チェックと大会情報の読み取りは、Firebase Admin SDK ではなく公開用の Firebase Web SDK で行います。  
+そのため、このエントリー処理では `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` は不要です。
 
 ## 管理者ログイン
 

@@ -31,7 +31,6 @@ export type EntryValidationStage =
   | "event_date"
   | "age_category_check"
   | "duplicate_email_check"
-  | "server_configuration"
   | "unexpected_error";
 
 export type EntryValidationFieldError = {
@@ -70,6 +69,12 @@ export type EntryValidationSuccess = {
 
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+export function buildEntryDocumentId(eventId: string, normalizedEmail: string) {
+  return `${encodeURIComponent(eventId.trim())}__${encodeURIComponent(
+    normalizeEmail(normalizedEmail),
+  )}`;
 }
 
 export function maskEmail(email: string) {

@@ -1,21 +1,33 @@
+import {
+  Timestamp,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore/lite";
 import { z } from "zod";
 
 import {
   buildAgeCategoryFieldErrors,
   buildDuplicateEmailFieldError,
+  buildEntryDocumentId,
   mapZodIssuesToFieldErrors,
   normalizeEmail,
   sanitizeValidationInput,
   type EntryValidationFieldError,
   type EntryValidationFailure,
 } from "@/lib/entries/entry-validation";
-import {
-  getAdminFirestore,
-  getMissingAdminFirestoreEnvNames,
-  isAdminFirestoreConfigured,
-} from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
+import {
+  getMissingPublicFirestoreEnvNames,
+  getPublicFirestore,
+} from "@/lib/firebase/public-firestore";
+import { getSiteUrl } from "@/lib/site-url";
 import { paymentService } from "@/lib/payments";
+import {
+  getCurrentEntryFee,
+  mapPublicEvent,
+} from "@/features/events/public-event-utils";
 
 export const runtime = "nodejs";
 
@@ -75,15 +87,6 @@ const checkoutSessionSchema = z.object({
 const checkoutSessionStatusSchema = z.object({
   session_id: z.string().min(1),
 });
-
-type ValidationPayload =
-  | (EntryValidationFailure & { ok: false })
-  | {
-      ok: true;
-      normalizedEmail: string;
-      eventDateIso: string;
-      calculatedAges: Array<number | null>;
-    };
 
 function toDate(value: unknown) {
   if (value instanceof Date) {
@@ -166,13 +169,13 @@ function logSchemaFailure(
 function buildServerConfigFailure() {
   return buildFailure(
     503,
-    "server_configuration",
+    "unexpected_error",
     "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
     [
       {
         field: "form",
         message: "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
-        code: "server_configuration_missing",
+        code: "firebase_public_configuration_missing",
       },
     ],
   );
@@ -253,11 +256,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (!isAdminFirestoreConfigured()) {
+    const missingPublicEnv = getMissingPublicFirestoreEnvNames();
+    if (missingPublicEnv.length > 0) {
       const failure = buildServerConfigFailure();
-      console.error("Stripe Checkout server configuration missing", {
-        stage: failure.stage,
-        missingEnvironmentVariables: getMissingAdminFirestoreEnvNames(),
+      console.error("Stripe Checkout public Firestore configuration missing", {
+        missingEnvironmentVariables: missingPublicEnv,
         validationResult: failure,
         formData: rawInput,
       });
@@ -271,13 +274,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const db = getAdminFirestore();
-    const eventSnapshot = await db
-      .collection(collections.events)
-      .doc(parsed.data.eventId)
-      .get();
+    const db = getPublicFirestore();
+    const eventSnapshot = await getDoc(
+      doc(db, collections.events, parsed.data.eventId),
+    );
 
-    if (!eventSnapshot.exists) {
+    if (!eventSnapshot.exists()) {
       const failure = buildFailure(404, "event_lookup", "大会が見つかりません。", [
         {
           field: "eventId",
@@ -403,34 +405,110 @@ export async function POST(request: Request) {
       return Response.json(failure, { status: failure.status });
     }
 
+    const athleteCount =
+      parsed.data.entryType === "representative"
+        ? parsed.data.athletes?.length ?? 0
+        : 1;
+    const pricingNow = getCurrentEntryFee(
+      mapPublicEvent(parsed.data.eventId, eventData),
+    );
+    const totalAmountNow = pricingNow.entryFee * athleteCount;
     const normalizedEmail =
       parsed.data.normalizedEmail ?? normalizeEmail(parsed.data.email);
+    const resolvedEntryId = buildEntryDocumentId(
+      parsed.data.eventId,
+      normalizedEmail,
+    );
 
-    const duplicateSnapshot = await db
-      .collection(collections.entries)
-      .where("eventId", "==", parsed.data.eventId)
-      .get();
+    if (parsed.data.entryId !== resolvedEntryId) {
+      console.error("Stripe Checkout entryId mismatch detected", {
+        submittedEntryId: parsed.data.entryId,
+        resolvedEntryId,
+        eventId: parsed.data.eventId,
+        normalizedEmail,
+      });
+    }
 
-    const duplicateExists = duplicateSnapshot.docs.some((entryDoc) => {
-      if (entryDoc.id === parsed.data.entryId) {
-        return false;
-      }
+    const entryRef = doc(db, collections.entries, resolvedEntryId);
 
-      const entryData = entryDoc.data() as {
-        email?: unknown;
-        normalizedEmail?: unknown;
-      };
-      const entryEmail =
-        typeof entryData.normalizedEmail === "string"
-          ? entryData.normalizedEmail
-          : typeof entryData.email === "string"
-            ? normalizeEmail(entryData.email)
-            : "";
-
-      return entryEmail === normalizedEmail;
-    });
-
-    if (duplicateExists) {
+    try {
+      await setDoc(entryRef, {
+        eventId: parsed.data.eventId,
+        eventTitle: parsed.data.eventTitle,
+        entryType: parsed.data.entryType,
+        entryStatus: "pending_payment",
+        paymentStatus: "pending",
+        paymentProvider: "stripe",
+        name: parsed.data.name,
+        kana: parsed.data.kana,
+        email: parsed.data.email,
+        normalizedEmail,
+        phone: parsed.data.phone,
+        gender: parsed.data.gender,
+        birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
+        gym:
+          parsed.data.entryType === "representative" && parsed.data.representative
+            ? parsed.data.representative.gym
+            : parsed.data.gym,
+        postalCode:
+          parsed.data.entryType === "representative" && parsed.data.representative
+            ? parsed.data.representative.postalCode
+            : parsed.data.postalCode,
+        prefecture:
+          parsed.data.entryType === "representative" && parsed.data.representative
+            ? parsed.data.representative.prefecture
+            : parsed.data.prefecture,
+        city:
+          parsed.data.entryType === "representative" && parsed.data.representative
+            ? parsed.data.representative.city
+            : parsed.data.city,
+        addressLine:
+          parsed.data.entryType === "representative" && parsed.data.representative
+            ? parsed.data.representative.addressLine
+            : parsed.data.addressLine,
+        category: parsed.data.category,
+        ageCategory: parsed.data.ageCategory,
+        weightClass: parsed.data.weightClass,
+        openClass: parsed.data.openClass ?? "no",
+        athlete:
+          parsed.data.entryType === "individual"
+            ? {
+                name: parsed.data.name,
+                kana: parsed.data.kana,
+                gender: parsed.data.gender,
+                birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
+                category: parsed.data.category,
+                ageCategory: parsed.data.ageCategory,
+                weightClass: parsed.data.weightClass,
+                openClass: parsed.data.openClass ?? "no",
+              }
+            : null,
+        representative: parsed.data.representative ?? null,
+        athletes: parsed.data.athletes ?? [],
+        entryFee: pricingNow.entryFee,
+        priceType: pricingNow.priceType,
+        athleteCount,
+        receptionStatus: "not_checked_in",
+        weighInStatus: "not_weighed",
+        bibNumber: "",
+        bracketPosition: "",
+        checkedInAt: null,
+        weighInAt: null,
+        participantCount: athleteCount,
+        categoryEntryCount: athleteCount,
+        subtotalAmount: totalAmountNow,
+        discountAmount: 0,
+        totalAmount: totalAmountNow,
+        currency: "JPY",
+        stripeSessionId: "",
+        stripeCheckoutSessionId: "",
+        stripePaymentIntentId: "",
+        paymentFailedAt: null,
+        paidAt: null,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      });
+    } catch (writeError) {
       const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
       const failure = buildFailure(
         409,
@@ -439,25 +517,54 @@ export async function POST(request: Request) {
         [duplicateError],
       );
 
-      logValidationFailure(
-        failure.stage,
-        failure.message,
-        rawInput,
-        failure.fieldErrors,
-      );
+      console.error("Stripe Checkout entry create failed", {
+        entryId: resolvedEntryId,
+        eventId: parsed.data.eventId,
+        normalizedEmail,
+        validationResult: failure,
+        formData: rawInput,
+        error:
+          writeError instanceof Error
+            ? {
+                name: writeError.name,
+                message: writeError.message,
+              }
+            : writeError,
+      });
+
       return Response.json(failure, { status: failure.status });
     }
 
-    const success: ValidationPayload = {
+    const successUrl =
+      parsed.data.successUrl ??
+      `${getSiteUrl()}/payment/success?entry_id=${resolvedEntryId}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(parsed.data.name)}&applicant_email=${encodeURIComponent(parsed.data.email)}&event_id=${encodeURIComponent(parsed.data.eventId)}&event_title=${encodeURIComponent(parsed.data.eventTitle)}&entry_type=${encodeURIComponent(parsed.data.entryType)}`;
+    const cancelUrl =
+      parsed.data.cancelUrl ??
+      `${getSiteUrl()}/payment/cancel?entry_id=${resolvedEntryId}`;
+
+    const session = await paymentService.createCheckoutSession({
+      entryId: resolvedEntryId,
+      eventId: parsed.data.eventId,
+      eventTitle: parsed.data.eventTitle,
+      entryType: parsed.data.entryType,
+      amount: totalAmountNow,
+      currency: parsed.data.currency,
+      itemName: parsed.data.itemName,
+      customerEmail: parsed.data.customerEmail ?? parsed.data.email,
+      successUrl,
+      cancelUrl,
+    });
+
+    return Response.json({
       ok: true,
       normalizedEmail,
       eventDateIso: eventDate.toISOString(),
       calculatedAges: applicants.map((applicant) =>
         sanitizeCalculatedAge(applicant.birthDate, eventDate),
       ),
-    };
-
-    return Response.json(success);
+      sessionId: session.sessionId,
+      url: session.url,
+    });
   } catch (error) {
     const failure = buildFailure(
       500,

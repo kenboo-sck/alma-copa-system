@@ -1,15 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import {
-  collection,
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-  updateDoc,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -23,6 +15,7 @@ import {
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import {
+  buildEntryDocumentId,
   calculateAgeOnDate,
   type EntryValidationFieldError,
   maskEmail,
@@ -284,8 +277,6 @@ function getValidationStageLabel(stage: string | null) {
       return "年齢カテゴリー確認";
     case "duplicate_email_check":
       return "メール重複確認";
-    case "server_configuration":
-      return "サーバー設定確認";
     case "unexpected_error":
       return "システム確認";
     default:
@@ -443,16 +434,6 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
     const athleteCount = resolvedAthletes.length;
     const pricingNow = getCurrentEntryFee(event);
     const totalAmountNow = pricingNow.entryFee * athleteCount;
-    const athletePayloads = resolvedAthletes.map((athlete) => ({
-      name: athlete.name,
-      kana: athlete.kana,
-      gender: athlete.gender,
-      birthDate: Timestamp.fromDate(new Date(athlete.birthDate)),
-      category: athlete.category,
-      ageCategory: athlete.ageCategory,
-      weightClass: athlete.weightClass,
-      openClass: athlete.openClass,
-    }));
 
     try {
       const validationResponse = await fetch("/api/entries/validate", {
@@ -502,81 +483,9 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
 
       const normalizedApplicantEmail =
         validationData?.normalizedEmail ?? normalizeEmail(applicantEmail);
-      const entryRef = doc(collection(db, collections.entries));
-      const successUrl = `${getSiteUrl()}/payment/success?entry_id=${entryRef.id}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(applicantName)}&applicant_email=${encodeURIComponent(applicantEmail)}&event_id=${encodeURIComponent(eventId)}&event_title=${encodeURIComponent(event.title)}&entry_type=${encodeURIComponent(draft.entryType)}`;
-      const cancelUrl = `${getSiteUrl()}/payment/cancel?entry_id=${entryRef.id}`;
-
-      await setDoc(entryRef, {
-        eventId,
-        eventTitle: event.title,
-        entryType: draft.entryType,
-        entryStatus: "pending_payment",
-        paymentStatus: "pending",
-        paymentProvider: "stripe",
-        name: applicantName,
-        kana: isRepresentative ? firstAthlete.kana : values.kana,
-        email: applicantEmail,
-        normalizedEmail: normalizedApplicantEmail,
-        phone: applicantPhone,
-        gender: isRepresentative ? firstAthlete.gender : values.gender,
-        birthDate: Timestamp.fromDate(new Date(firstAthlete.birthDate)),
-        gym: applicantGym,
-        postalCode: applicantPostalCode,
-        prefecture: applicantPrefecture,
-        city: applicantCity,
-        addressLine: applicantAddressLine,
-        category: isRepresentative ? firstAthlete.category : values.category,
-        ageCategory: isRepresentative ? firstAthlete.ageCategory : values.ageCategory,
-        weightClass: isRepresentative ? firstAthlete.weightClass : values.weightClass,
-        openClass: isRepresentative ? firstAthlete.openClass : values.openClass,
-        athlete: isRepresentative
-          ? null
-          : {
-              name: values.name,
-              kana: values.kana,
-              gender: values.gender,
-              birthDate: Timestamp.fromDate(new Date(values.birthDate)),
-              category: values.category,
-              ageCategory: values.ageCategory,
-              weightClass: values.weightClass,
-              openClass: values.openClass,
-            },
-        representative: isRepresentative
-          ? {
-              name: values.representativeName,
-              email: values.representativeEmail,
-              phone: values.representativePhone,
-              gym: values.representativeGym,
-              postalCode: values.representativePostalCode,
-              prefecture: values.representativePrefecture,
-              city: values.representativeCity,
-              addressLine: values.representativeAddressLine,
-            }
-          : null,
-        athletes: isRepresentative ? athletePayloads : [],
-        entryFee: pricingNow.entryFee,
-        priceType: pricingNow.priceType,
-        athleteCount,
-        receptionStatus: "not_checked_in",
-        weighInStatus: "not_weighed",
-        bibNumber: "",
-        bracketPosition: "",
-        checkedInAt: null,
-        weighInAt: null,
-        participantCount: athleteCount,
-        categoryEntryCount: athleteCount,
-        subtotalAmount: totalAmountNow,
-        discountAmount: 0,
-        totalAmount: totalAmountNow,
-        currency: "JPY",
-        stripeSessionId: "",
-        stripeCheckoutSessionId: "",
-        stripePaymentIntentId: "",
-        paymentFailedAt: null,
-        paidAt: null,
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
+      const entryId = buildEntryDocumentId(eventId, normalizedApplicantEmail);
+      const successUrl = `${getSiteUrl()}/payment/success?entry_id=${entryId}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(applicantName)}&applicant_email=${encodeURIComponent(applicantEmail)}&event_id=${encodeURIComponent(eventId)}&event_title=${encodeURIComponent(event.title)}&entry_type=${encodeURIComponent(draft.entryType)}`;
+      const cancelUrl = `${getSiteUrl()}/payment/cancel?entry_id=${entryId}`;
 
       const response = await fetch("/api/payments/checkout-session", {
         method: "POST",
@@ -584,7 +493,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          entryId: entryRef.id,
+          entryId,
           eventId,
           eventTitle: event.title,
           entryType: draft.entryType,
@@ -664,17 +573,6 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           data.message ?? data.error ?? "決済ページの作成に失敗しました。",
         );
       }
-
-      await updateDoc(entryRef, {
-        stripeSessionId: data.sessionId,
-        stripeCheckoutSessionId: data.sessionId,
-        updatedAt: serverTimestamp(),
-      }).catch((saveError: unknown) => {
-        console.error("Stripe session ID の保存に失敗しました", {
-          entryId: entryRef.id,
-          saveError,
-        });
-      });
 
       window.location.href = data.url;
     } catch (caughtError) {

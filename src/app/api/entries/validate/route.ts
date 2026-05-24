@@ -1,21 +1,19 @@
 import { z } from "zod";
+import { doc, getDoc } from "firebase/firestore/lite";
 
 import {
   buildAgeCategoryFieldErrors,
-  buildDuplicateEmailFieldError,
   mapZodIssuesToFieldErrors,
-  normalizeEmail,
   sanitizeValidationInput,
   type EntryValidationFieldError,
   type EntryValidationFailure,
   type EntryValidationSuccess,
 } from "@/lib/entries/entry-validation";
-import {
-  getAdminFirestore,
-  getMissingAdminFirestoreEnvNames,
-  isAdminFirestoreConfigured,
-} from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
+import {
+  getMissingPublicFirestoreEnvNames,
+  getPublicFirestore,
+} from "@/lib/firebase/public-firestore";
 
 export const runtime = "nodejs";
 
@@ -101,21 +99,6 @@ function logValidationFailure(
   });
 }
 
-function buildServerConfigFailure() {
-  return buildFailure(
-    503,
-    "server_configuration",
-    "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
-    [
-      {
-        field: "form",
-        message: "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
-        code: "server_configuration_missing",
-      },
-    ],
-  );
-}
-
 export async function POST(request: Request) {
   const json = await request.json().catch(() => null);
   const parsed = validationSchema.safeParse(json);
@@ -146,12 +129,24 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (!isAdminFirestoreConfigured()) {
-      const failure = buildServerConfigFailure();
+    const missingPublicEnv = getMissingPublicFirestoreEnvNames();
+    if (missingPublicEnv.length > 0) {
+      const failure = buildFailure(
+        503,
+        "unexpected_error",
+        "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
+        [
+          {
+            field: "form",
+            message:
+              "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
+            code: "firebase_public_configuration_missing",
+          },
+        ],
+      );
 
-      console.error("Entry validation server configuration missing", {
-        stage: failure.stage,
-        missingEnvironmentVariables: getMissingAdminFirestoreEnvNames(),
+      console.error("Entry validation public Firestore configuration missing", {
+        missingEnvironmentVariables: missingPublicEnv,
         validationResult: failure,
         formData: rawInput,
       });
@@ -159,13 +154,10 @@ export async function POST(request: Request) {
       return Response.json(failure, { status: failure.status });
     }
 
-    const db = getAdminFirestore();
-    const eventSnapshot = await db
-      .collection(collections.events)
-      .doc(parsed.data.eventId)
-      .get();
+    const db = getPublicFirestore();
+    const eventSnapshot = await getDoc(doc(db, collections.events, parsed.data.eventId));
 
-    if (!eventSnapshot.exists) {
+    if (!eventSnapshot.exists()) {
       const failure = buildFailure(404, "event_lookup", "大会が見つかりません。", [
         {
           field: "eventId",
@@ -260,48 +252,9 @@ export async function POST(request: Request) {
       return Response.json(failure, { status: failure.status });
     }
 
-    const normalizedEmail = normalizeEmail(parsed.data.email);
-    const duplicateSnapshot = await db
-      .collection(collections.entries)
-      .where("eventId", "==", parsed.data.eventId)
-      .get();
-
-    const duplicateExists = duplicateSnapshot.docs.some((entryDoc) => {
-      const entryData = entryDoc.data() as {
-        email?: unknown;
-        normalizedEmail?: unknown;
-      };
-      const entryEmail =
-        typeof entryData.normalizedEmail === "string"
-          ? entryData.normalizedEmail
-          : typeof entryData.email === "string"
-            ? normalizeEmail(entryData.email)
-            : "";
-
-      return entryEmail === normalizedEmail;
-    });
-
-    if (duplicateExists) {
-      const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
-      const failure = buildFailure(
-        409,
-        "duplicate_email_check",
-        duplicateError.message,
-        [duplicateError],
-      );
-
-      logValidationFailure(
-        failure.stage,
-        failure.message,
-        rawInput,
-        failure.fieldErrors,
-      );
-      return Response.json(failure, { status: failure.status });
-    }
-
     const success: ValidationPayload = {
       ok: true,
-      normalizedEmail,
+      normalizedEmail: parsed.data.email.trim().toLowerCase(),
       eventDateIso: eventDate.toISOString(),
       calculatedAges: applicants.map((applicant) =>
         applicant.birthDate
