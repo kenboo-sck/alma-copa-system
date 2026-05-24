@@ -3,22 +3,16 @@ import "server-only";
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
-function getProjectId() {
-  const projectId =
+function getAdminProjectId() {
+  return (
     process.env.FIREBASE_PROJECT_ID?.trim() ||
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim();
-
-  if (!projectId) {
-    throw new Error(
-      "Missing required environment variable: FIREBASE_PROJECT_ID or NEXT_PUBLIC_FIREBASE_PROJECT_ID",
-    );
-  }
-
-  return projectId;
+    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim() ||
+    ""
+  );
 }
 
 function getAdminCredentials() {
-  const projectId = getProjectId();
+  const projectId = getAdminProjectId();
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
@@ -31,7 +25,7 @@ function getAdminCredentials() {
   }
 
   throw new Error(
-    "Firebase Admin credentials are not configured. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY.",
+    "Firebase Admin credentials are not configured. Set FIREBASE_PROJECT_ID (or NEXT_PUBLIC_FIREBASE_PROJECT_ID), FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY.",
   );
 }
 
@@ -42,7 +36,7 @@ export function getAdminApp(): App {
 
   return initializeApp({
     credential: getAdminCredentials(),
-    projectId: getProjectId(),
+    projectId: getAdminProjectId(),
   });
 }
 
@@ -50,12 +44,27 @@ export function getAdminFirestore() {
   return getFirestore(getAdminApp());
 }
 
-export function isAdminFirestoreConfigured() {
+export function getMissingAdminFirestoreEnvNames() {
+  const missing: string[] = [];
   const projectId =
     process.env.FIREBASE_PROJECT_ID?.trim() ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim();
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.trim();
 
-  return Boolean(projectId && clientEmail && privateKey);
+  if (!projectId) {
+    missing.push("FIREBASE_PROJECT_ID (or NEXT_PUBLIC_FIREBASE_PROJECT_ID)");
+  }
+  if (!clientEmail) {
+    missing.push("FIREBASE_CLIENT_EMAIL");
+  }
+  if (!privateKey) {
+    missing.push("FIREBASE_PRIVATE_KEY");
+  }
+
+  return missing;
+}
+
+export function isAdminFirestoreConfigured() {
+  return getMissingAdminFirestoreEnvNames().length === 0;
 }

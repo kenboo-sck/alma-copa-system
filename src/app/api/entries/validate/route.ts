@@ -10,7 +10,11 @@ import {
   type EntryValidationFailure,
   type EntryValidationSuccess,
 } from "@/lib/entries/entry-validation";
-import { getAdminFirestore, isAdminFirestoreConfigured } from "@/lib/firebase/admin";
+import {
+  getAdminFirestore,
+  getMissingAdminFirestoreEnvNames,
+  isAdminFirestoreConfigured,
+} from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
 
 export const runtime = "nodejs";
@@ -101,12 +105,11 @@ function buildServerConfigFailure() {
   return buildFailure(
     503,
     "server_configuration",
-    "サーバー側の検証設定が不足しています。FIREBASE_CLIENT_EMAIL と FIREBASE_PRIVATE_KEY を設定してください。",
+    "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
     [
       {
         field: "form",
-        message:
-          "サーバー側の検証設定が不足しています。FIREBASE_CLIENT_EMAIL と FIREBASE_PRIVATE_KEY を設定してください。",
+        message: "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
         code: "server_configuration_missing",
       },
     ],
@@ -146,12 +149,13 @@ export async function POST(request: Request) {
     if (!isAdminFirestoreConfigured()) {
       const failure = buildServerConfigFailure();
 
-      logValidationFailure(
-        failure.stage,
-        failure.message,
-        rawInput,
-        failure.fieldErrors,
-      );
+      console.error("Entry validation server configuration missing", {
+        stage: failure.stage,
+        missingEnvironmentVariables: getMissingAdminFirestoreEnvNames(),
+        validationResult: failure,
+        formData: rawInput,
+      });
+
       return Response.json(failure, { status: failure.status });
     }
 

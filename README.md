@@ -31,6 +31,42 @@ Firebase Emulatorを使う場合:
 npm run emulators
 ```
 
+## Vercel 本番環境の環境変数
+
+Stripe Checkout、Firestore 保存、決済前の重複チェック、完了メール送信を本番で動かすために、Vercel には以下を設定してください。
+
+### Firebase Client 側
+
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+- `NEXT_PUBLIC_FIREBASE_APP_ID`
+
+### Firebase Admin 側
+
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_CLIENT_EMAIL`
+- `FIREBASE_PRIVATE_KEY`
+
+`FIREBASE_PRIVATE_KEY` は Vercel 上では改行が `\n` 形式で保存されるため、コード側で `replace(/\\n/g, "\n")` して復元しています。
+
+### Stripe
+
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `NEXT_PUBLIC_STRIPE_TEST_MODE`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+
+### メール送信
+
+- `MAIL_PROVIDER`
+- `PHP_MAIL_API_URL`
+- `MAIL_PROVIDER_API_KEY`
+- `ADMIN_NOTIFICATION_EMAIL`
+- `MAIL_FROM_ADDRESS`
+
 ## 管理者ログイン
 
 管理画面は Firebase Authentication のメールアドレス + パスワードログインを使います。ログイン後、Firestore の `adminUsers/{uid}` に有効な管理者ドキュメントが存在する場合のみ `/admin` 配下を閲覧できます。
