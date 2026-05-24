@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useForm } from "react-hook-form";
 
 import { Button } from "@/components/ui/button";
@@ -17,8 +17,10 @@ type AdminEventFormModalProps = {
   event: AdminEvent | null;
   isSaving: boolean;
   onClose: () => void;
-  onSubmit: (values: EventFormValues) => Promise<void>;
+  onSubmit: (values: EventFormValues, imageFile: File | null) => Promise<void>;
 };
+
+const defaultEventImage = "/images/event-card-bg.jpg";
 
 export function AdminEventFormModal({
   event,
@@ -26,6 +28,9 @@ export function AdminEventFormModal({
   onClose,
   onSubmit,
 }: AdminEventFormModalProps) {
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(event?.imageUrl || "");
+  const objectPreviewUrlRef = useRef<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -39,6 +44,32 @@ export function AdminEventFormModal({
   useEffect(() => {
     reset(event ? getEventFormValues(event) : defaultEventFormValues);
   }, [event, reset]);
+
+  useEffect(() => {
+    return () => {
+      if (objectPreviewUrlRef.current) {
+        URL.revokeObjectURL(objectPreviewUrlRef.current);
+      }
+    };
+  }, []);
+
+  function handleImageChange(changeEvent: ChangeEvent<HTMLInputElement>) {
+    const nextFile = changeEvent.target.files?.[0] ?? null;
+    if (objectPreviewUrlRef.current) {
+      URL.revokeObjectURL(objectPreviewUrlRef.current);
+      objectPreviewUrlRef.current = null;
+    }
+
+    setImageFile(nextFile);
+
+    if (nextFile) {
+      const objectUrl = URL.createObjectURL(nextFile);
+      objectPreviewUrlRef.current = objectUrl;
+      setImagePreviewUrl(objectUrl);
+    } else {
+      setImagePreviewUrl(event?.imageUrl || "");
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex items-end bg-black/75 px-3 py-4 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6">
@@ -62,7 +93,9 @@ export function AdminEventFormModal({
         </div>
 
         <form
-          onSubmit={(formEvent) => void handleSubmit(onSubmit)(formEvent)}
+          onSubmit={(formEvent) =>
+            void handleSubmit((values) => onSubmit(values, imageFile))(formEvent)
+          }
           className="p-5"
         >
           <div className="grid gap-4 md:grid-cols-2">
@@ -90,6 +123,42 @@ export function AdminEventFormModal({
                 </span>
               ) : null}
             </label>
+
+            <div className="space-y-3 md:col-span-2">
+              <div>
+                <span className="text-sm font-semibold text-zinc-200">
+                  大会メイン画像
+                </span>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  トップページ、大会一覧、大会詳細に表示されます。
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-[220px_1fr] sm:items-start">
+                <div
+                  className="min-h-36 overflow-hidden rounded-md border border-white/10 bg-cover bg-center bg-no-repeat"
+                  style={{
+                    backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.12),rgba(0,0,0,0.42)),url('${imagePreviewUrl || defaultEventImage}')`,
+                  }}
+                />
+                <label className="flex min-h-36 cursor-pointer flex-col justify-center rounded-md border border-dashed border-alma-gold/35 bg-black px-4 py-4 transition hover:border-alma-gold">
+                  <span className="text-sm font-semibold text-alma-gold">
+                    画像を選択
+                  </span>
+                  <span className="mt-2 text-xs leading-5 text-zinc-400">
+                    JPG、PNG、WebPなどの画像ファイルを選択してください。保存時にFirebase Storageへアップロードします。
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="mt-4 block w-full text-xs text-zinc-400 file:mr-3 file:rounded-md file:border-0 file:bg-alma-gold file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black"
+                  />
+                  <span className="mt-3 truncate text-xs text-zinc-500">
+                    {imageFile?.name || (event?.imageUrl ? "現在の画像を使用" : "未選択")}
+                  </span>
+                </label>
+              </div>
+            </div>
 
             <label className="space-y-2">
               <span className="text-sm font-semibold text-zinc-200">開催日</span>

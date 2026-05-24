@@ -17,8 +17,10 @@ import {
 import {
   formatDate,
   formatDateTime,
+  getEventImageUrl,
   getEntryState,
   mapPublicEvent,
+  toCssUrl,
   type PublicEvent,
 } from "./public-event-utils";
 
@@ -139,7 +141,7 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
     );
   }
 
-  const heroImage = event.heroImage || "/images/event-detail-hero.jpg";
+  const heroImage = getEventImageUrl(event);
   const hasEntry = Boolean(entryState?.canEnter);
   const feeCards = [
     {
@@ -168,7 +170,7 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
         <div
           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
           style={{
-            backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.16),rgba(0,0,0,0.34)), url('${heroImage}')`,
+            backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.16),rgba(0,0,0,0.34)), url('${toCssUrl(heroImage)}')`,
             backgroundPosition: "center",
           }}
           aria-hidden="true"

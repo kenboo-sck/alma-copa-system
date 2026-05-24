@@ -4,6 +4,9 @@ export type EventDocument = {
   title: string;
   slug?: string;
   description?: string;
+  imageUrl?: string;
+  imagePath?: string;
+  heroImage?: string;
   venue: string;
   eventDate: Date;
   entryStartAt: Date;

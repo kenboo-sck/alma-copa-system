@@ -16,8 +16,10 @@ import {
 import {
   formatDate,
   formatDateTime,
+  getEventImageUrl,
   getEntryState,
   mapPublicEvent,
+  toCssUrl,
   type PublicEvent,
 } from "./public-event-utils";
 
@@ -117,6 +119,7 @@ export function PublicEventsList() {
           <div className="grid gap-4">
             {events.map((event) => {
               const entryState = getEntryState(event);
+              const eventImage = getEventImageUrl(event, "/images/event-card-bg.jpg");
 
               return (
                 <article
@@ -127,8 +130,7 @@ export function PublicEventsList() {
                     <div
                       className="relative min-h-48 overflow-hidden border-b border-white/10 lg:border-b-0 lg:border-r"
                       style={{
-                        backgroundImage:
-                          "linear-gradient(180deg,rgba(0,0,0,0.14),rgba(0,0,0,0.84)),linear-gradient(135deg,rgba(9,9,9,0.28) 0%,rgba(23,23,23,0.2) 100%),url('/images/event-card-bg.jpg')",
+                        backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.14),rgba(0,0,0,0.84)),linear-gradient(135deg,rgba(9,9,9,0.28) 0%,rgba(23,23,23,0.2) 100%),url('${toCssUrl(eventImage)}')`,
                         backgroundSize: "cover",
                         backgroundPosition: "center",
                       }}

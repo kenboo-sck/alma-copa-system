@@ -6,6 +6,7 @@ import {
   initializeFirestore,
   type Firestore,
 } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 function requirePublicEnv(name: string, value: string | undefined) {
   if (!value) {
@@ -80,6 +81,7 @@ function createFirestore(): Firestore {
 }
 
 export const db = createFirestore();
+export const storage = getStorage(firebaseApp);
 
 declare global {
   interface Window {

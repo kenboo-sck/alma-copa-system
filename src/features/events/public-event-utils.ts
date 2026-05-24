@@ -8,6 +8,8 @@ export type PublicEvent = {
   description: string;
   category: string;
   heroImage: string;
+  imageUrl: string;
+  imagePath: string;
   eventDate: Date | null;
   venue: string;
   entryStartAt: Date | null;
@@ -25,6 +27,20 @@ export type PublicEvent = {
 };
 
 export type PriceType = "early" | "regular" | "late";
+
+export const defaultEventCardImage = "/images/event-card-bg.jpg";
+export const defaultEventHeroImage = "/images/event-detail-hero.jpg";
+
+export function getEventImageUrl(
+  event: Pick<PublicEvent, "imageUrl" | "heroImage">,
+  fallback = defaultEventHeroImage,
+) {
+  return event.imageUrl || event.heroImage || fallback;
+}
+
+export function toCssUrl(imageUrl: string) {
+  return imageUrl.replace(/'/g, "\\'");
+}
 
 export function toDate(value: unknown): Date | null {
   if (value instanceof Timestamp) {
@@ -50,6 +66,13 @@ export function mapPublicEvent(id: string, data: DocumentData): PublicEvent {
     description: typeof data.description === "string" ? data.description : "",
     category: typeof data.category === "string" ? data.category : "BJJ TOURNAMENT",
     heroImage: typeof data.heroImage === "string" ? data.heroImage : "",
+    imageUrl:
+      typeof data.imageUrl === "string"
+        ? data.imageUrl
+        : typeof data.heroImage === "string"
+          ? data.heroImage
+          : "",
+    imagePath: typeof data.imagePath === "string" ? data.imagePath : "",
     eventDate: toDate(data.eventDate),
     venue: typeof data.venue === "string" ? data.venue : "",
     entryStartAt: toDate(data.entryStartAt),

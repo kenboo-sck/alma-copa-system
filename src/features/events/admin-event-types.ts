@@ -18,6 +18,8 @@ export type AdminEvent = {
   lateStartAt: Date | null;
   lateEndAt: Date | null;
   status: EventStatus;
+  imageUrl: string;
+  imagePath: string;
   createdAt: Date | null;
   updatedAt: Date | null;
   entryCount: number;

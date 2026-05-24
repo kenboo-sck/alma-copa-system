@@ -8,10 +8,15 @@ import {
   serverTimestamp,
   updateDoc,
 } from "firebase/firestore";
+import {
+  getDownloadURL,
+  ref as storageRef,
+  uploadBytes,
+} from "firebase/storage";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { db } from "@/lib/firebase/client";
+import { db, storage } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import type { EventStatus } from "@/types/event";
 
@@ -33,6 +38,21 @@ import {
 
 function getComparableTime(value: Date | null, fallback: number) {
   return value?.getTime() ?? fallback;
+}
+
+async function uploadEventMainImage(eventId: string, imageFile: File) {
+  const imagePath = `events/${eventId}/main-image`;
+  const imageRef = storageRef(storage, imagePath);
+
+  await uploadBytes(imageRef, imageFile, {
+    contentType: imageFile.type || "application/octet-stream",
+    cacheControl: "public,max-age=3600",
+  });
+
+  return {
+    imagePath,
+    imageUrl: await getDownloadURL(imageRef),
+  };
 }
 
 export function AdminEventsManager() {
@@ -188,22 +208,35 @@ export function AdminEventsManager() {
     setEditingEvent(null);
   }
 
-  async function saveEvent(values: EventFormValues) {
+  async function saveEvent(values: EventFormValues, imageFile: File | null) {
     setIsSaving(true);
     setError(null);
 
     try {
       if (editingEvent) {
+        const imagePayload = imageFile
+          ? await uploadEventMainImage(editingEvent.id, imageFile)
+          : {};
+
         await updateDoc(
           doc(db, collections.events, editingEvent.id),
-          createEventPayload(values),
+          {
+            ...createEventPayload(values),
+            ...imagePayload,
+          },
         );
         setToast("大会を更新しました。");
       } else {
-        await addDoc(collection(db, collections.events), {
+        const eventRef = await addDoc(collection(db, collections.events), {
           ...createEventPayload(values),
           createdAt: serverTimestamp(),
         });
+
+        if (imageFile) {
+          const imagePayload = await uploadEventMainImage(eventRef.id, imageFile);
+          await updateDoc(eventRef, imagePayload);
+        }
+
         setToast("大会を作成しました。");
       }
 
@@ -211,7 +244,7 @@ export function AdminEventsManager() {
       setEditingEvent(null);
     } catch (caughtError) {
       console.error(caughtError);
-      setError("保存に失敗しました。入力内容と管理者権限を確認してください。");
+      setError("保存に失敗しました。入力内容、画像ファイル、管理者権限を確認してください。");
     } finally {
       setIsSaving(false);
     }
@@ -316,6 +349,7 @@ export function AdminEventsManager() {
 
       {isFormOpen ? (
         <AdminEventFormModal
+          key={editingEvent?.id ?? "new"}
           event={editingEvent}
           isSaving={isSaving}
           onClose={closeForm}

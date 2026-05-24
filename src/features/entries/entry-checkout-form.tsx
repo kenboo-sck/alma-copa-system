@@ -32,8 +32,10 @@ import {
   formatDate,
   formatDateTime,
   getCurrentEntryFee,
+  getEventImageUrl,
   getEntryState,
   mapPublicEvent,
+  toCssUrl,
   type PublicEvent,
 } from "@/features/events/public-event-utils";
 import type { EntryType } from "@/types/entry";
@@ -595,7 +597,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
   }
 
   const entryState = event ? getEntryState(event) : null;
-  const heroImage = event?.heroImage || "/images/event-detail-hero.jpg";
+  const heroImage = event ? getEventImageUrl(event) : "/images/event-detail-hero.jpg";
   const entryTypeLabel =
     entryType === "representative" ? "REPRESENTATIVE ENTRY" : "INDIVIDUAL ENTRY";
   const entryTypeTitle =
@@ -621,7 +623,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
         <div
           className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
           style={{
-            backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.18),rgba(0,0,0,0.58)), url('${heroImage.replace(/'/g, "\\'")}')`,
+            backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.18),rgba(0,0,0,0.58)), url('${toCssUrl(heroImage)}')`,
           }}
           aria-hidden="true"
         />

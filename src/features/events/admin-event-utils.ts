@@ -167,6 +167,13 @@ export function mapEventData(id: string, data: DocumentData, entryCount = 0): Ad
     lateEndAt: toDate(data.lateEndAt),
     status:
       data.status === "published" || data.status === "closed" ? data.status : "draft",
+    imageUrl:
+      typeof data.imageUrl === "string"
+        ? data.imageUrl
+        : typeof data.heroImage === "string"
+          ? data.heroImage
+          : "",
+    imagePath: typeof data.imagePath === "string" ? data.imagePath : "",
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
     entryCount,

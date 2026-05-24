@@ -14,11 +14,16 @@ import {
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 
+import {
+  defaultEventHeroImage,
+  getEventImageUrl,
+  mapPublicEvent,
+  toCssUrl,
+} from "./public-event-utils";
+
 type EntryTypeSelectionProps = {
   eventId: string;
 };
-
-const fallbackHeroImage = "/images/event-detail-hero.jpg";
 
 const entryOptions = [
   {
@@ -45,21 +50,17 @@ const entryOptions = [
   },
 ] as const;
 
-function toCssUrl(imageUrl: string) {
-  return imageUrl.replace(/'/g, "\\'");
-}
-
 export function EntryTypeSelection({ eventId }: EntryTypeSelectionProps) {
-  const [heroImage, setHeroImage] = useState(fallbackHeroImage);
+  const [heroImage, setHeroImage] = useState(defaultEventHeroImage);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(doc(db, collections.events, eventId), (snapshot) => {
-      const nextHeroImage = snapshot.data()?.heroImage;
+      const data = snapshot.data();
 
       setHeroImage(
-        typeof nextHeroImage === "string" && nextHeroImage
-          ? nextHeroImage
-          : fallbackHeroImage,
+        data
+          ? getEventImageUrl(mapPublicEvent(snapshot.id, data))
+          : defaultEventHeroImage,
       );
     });
 
