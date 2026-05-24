@@ -34,6 +34,48 @@ function json_response(int $statusCode, array $payload): never
     exit;
 }
 
+function debug_enabled(array $config): bool
+{
+    $value = config_value($config, 'MAIL_API_DEBUG', 'false');
+    return $value === '1' || strtolower((string) $value) === 'true' || ($_GET['debug'] ?? '') === '1';
+}
+
+function mask_value(?string $value): ?string
+{
+    if ($value === null || $value === '') {
+        return $value;
+    }
+
+    if (strlen($value) <= 6) {
+        return '***';
+    }
+
+    return substr($value, 0, 3) . '***' . substr($value, -3);
+}
+
+function debug_context(array $config, array $extra = []): array
+{
+    return array_merge([
+        'method' => $_SERVER['REQUEST_METHOD'] ?? null,
+        'contentType' => $_SERVER['CONTENT_TYPE'] ?? null,
+        'smtpHost' => config_value($config, 'SMTP_HOST'),
+        'smtpPort' => config_value($config, 'SMTP_PORT', '587'),
+        'smtpUser' => mask_value(config_value($config, 'SMTP_USER')),
+        'fromAddress' => config_value($config, 'MAIL_FROM_ADDRESS'),
+        'hasSmtpPassword' => config_value($config, 'SMTP_PASSWORD') !== null,
+        'phpVersion' => PHP_VERSION,
+    ], $extra);
+}
+
+function debug_response(int $statusCode, array $payload, array $config, array $extra = []): never
+{
+    if (debug_enabled($config)) {
+        $payload['debug'] = debug_context($config, $extra);
+    }
+
+    json_response($statusCode, $payload);
+}
+
 function allowed_origins(array $config): array
 {
     if (isset($config['CORS_ALLOWED_ORIGINS']) && is_array($config['CORS_ALLOWED_ORIGINS'])) {
@@ -77,19 +119,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    json_response(405, [
+    debug_response(405, [
         'success' => false,
         'error' => 'Method not allowed.',
-    ]);
+    ], $config);
 }
 
 $rawBody = file_get_contents('php://input');
 $payload = json_decode($rawBody === false ? '' : $rawBody, true);
 
 if (!is_array($payload)) {
-    json_response(400, [
+    debug_response(400, [
         'success' => false,
         'error' => 'Invalid JSON body.',
+    ], $config, [
+        'rawBodyLength' => $rawBody === false ? null : strlen($rawBody),
+        'jsonError' => json_last_error_msg(),
     ]);
 }
 
@@ -99,16 +144,20 @@ $html = (string) ($payload['html'] ?? '');
 $text = (string) ($payload['text'] ?? '');
 
 if ($to === '' || $subject === '' || $html === '' || $text === '') {
-    json_response(400, [
+    debug_response(400, [
         'success' => false,
         'error' => 'Required fields: to, subject, html, text.',
+    ], $config, [
+        'receivedKeys' => array_keys($payload),
     ]);
 }
 
 if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-    json_response(400, [
+    debug_response(400, [
         'success' => false,
         'error' => 'Invalid recipient email address.',
+    ], $config, [
+        'recipient' => $to,
     ]);
 }
 
@@ -128,18 +177,20 @@ foreach ($requiredKeys as $key) {
 }
 
 if ($missingKeys !== []) {
-    json_response(500, [
+    debug_response(500, [
         'success' => false,
         'error' => 'SMTP configuration is incomplete: ' . implode(', ', $missingKeys),
+    ], $config, [
+        'missingKeys' => $missingKeys,
     ]);
 }
 
 $fromAddress = (string) config_value($config, 'MAIL_FROM_ADDRESS');
 if (!filter_var($fromAddress, FILTER_VALIDATE_EMAIL)) {
-    json_response(500, [
+    debug_response(500, [
         'success' => false,
         'error' => 'MAIL_FROM_ADDRESS is invalid.',
-    ]);
+    ], $config);
 }
 
 $mail = new PHPMailer(true);
@@ -168,8 +219,13 @@ try {
 
     json_response(200, ['success' => true]);
 } catch (MailerException $error) {
-    json_response(500, [
+    error_log('ALMA COPA mail send failed: ' . $error->getMessage());
+
+    debug_response(500, [
         'success' => false,
         'error' => $error->getMessage(),
+    ], $config, [
+        'recipient' => $to,
+        'mailerError' => $error->getMessage(),
     ]);
 }

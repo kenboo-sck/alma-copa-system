@@ -24,4 +24,8 @@ return [
         'https://copa-alma.com',
         'https://*.vercel.app',
     ],
+
+    // true にするとレスポンスにSMTP設定状態などのデバッグ情報を含めます。
+    // SMTP_PASSWORD の値は出力しません。本番調査後は false に戻してください。
+    'MAIL_API_DEBUG' => false,
 ];

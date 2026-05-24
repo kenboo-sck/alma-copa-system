@@ -116,6 +116,8 @@ export async function POST(request: Request) {
       entryId: parsed.data.entryId,
       eventId: parsed.data.eventId,
       eventTitle: parsed.data.eventTitle,
+      provider: status.provider,
+      providerDetails: error instanceof EmailProviderError ? error.details : null,
     });
 
     if (error instanceof EmailProviderError) {

@@ -221,6 +221,12 @@ async function sendSingleEmail(to: string, subject: string, text: string, html: 
 
 async function sendPhpEmail(to: string, subject: string, text: string, html: string): Promise<EmailSendResult> {
   const phpMailApiUrl = getPhpMailApiUrl();
+  console.info("PHP mail API request started", {
+    url: phpMailApiUrl,
+    recipient: to,
+    subject,
+  });
+
   const response = await fetch(phpMailApiUrl, {
     method: "POST",
     headers: {
@@ -239,6 +245,15 @@ async function sendPhpEmail(to: string, subject: string, text: string, html: str
   const isSuccess = data?.success === true;
 
   if (!response.ok || !isSuccess) {
+    console.error("PHP mail API request failed", {
+      url: phpMailApiUrl,
+      recipient: to,
+      status: response.status,
+      statusText: response.statusText,
+      body: data ?? bodyText,
+      bodyText,
+    });
+
     throw new EmailProviderError(getBodyString(data, "error") || `PHP mail API request failed with status ${response.status}`, {
       provider: "php",
       status: response.status,

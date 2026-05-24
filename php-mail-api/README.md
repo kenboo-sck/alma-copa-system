@@ -19,6 +19,7 @@ php-mail-api/
   config.php
   send-entry-mail.php
   test-send.html
+  test-send.php
   vendor/
 ```
 
@@ -54,6 +55,7 @@ Copy-Item config.sample.php config.php
 ```text
 send-entry-mail.php
 test-send.html
+test-send.php
 config.php
 vendor/
 ```
@@ -62,6 +64,12 @@ vendor/
 
 ```text
 https://mail.copa-alma.com/api/test-send.html
+```
+
+PHPだけで同じサーバー上のAPIを確認する場合:
+
+```text
+https://mail.copa-alma.com/api/test-send.php
 ```
 
 7. 宛先メールアドレスを入力して送信し、JSONレスポンスとメール受信を確認します。
@@ -80,6 +88,7 @@ return [
         'https://copa-alma.com',
         'https://*.vercel.app',
     ],
+    'MAIL_API_DEBUG' => false,
 ];
 ```
 
@@ -96,6 +105,8 @@ return [
 `MAIL_FROM_NAME`: メールの送信者名です。例: `ALMA COPA`
 
 `CORS_ALLOWED_ORIGINS`: ブラウザからこのAPIを直接呼べるサイトです。本番は `https://copa-alma.com`、Vercel preview検証用に `https://*.vercel.app` を許可しています。
+
+`MAIL_API_DEBUG`: `true` にすると、エラー時のレスポンスに `method` / `contentType` / SMTP設定有無 / JSON parse結果などのデバッグ情報を含めます。`SMTP_PASSWORD` の値は出力しません。調査後は `false` に戻してください。`config.php` を変更できない一時確認では `?debug=1` を付けても同じデバッグ情報を返します。
 
 ## API仕様
 
@@ -144,6 +155,19 @@ curl -i -X POST "https://mail.copa-alma.com/api/send-entry-mail.php" \
   -d '{
     "to": "your-address@example.com",
     "subject": "ALMA COPA メールAPIテスト",
+    "html": "<p>ALMA COPA メールAPIのHTMLテストです。</p>",
+    "text": "ALMA COPA メールAPIのテキストテストです。"
+  }'
+```
+
+デバッグ付き:
+
+```bash
+curl -i -X POST "https://mail.copa-alma.com/api/send-entry-mail.php?debug=1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "your-address@example.com",
+    "subject": "ALMA COPA メールAPIデバッグテスト",
     "html": "<p>ALMA COPA メールAPIのHTMLテストです。</p>",
     "text": "ALMA COPA メールAPIのテキストテストです。"
   }'
