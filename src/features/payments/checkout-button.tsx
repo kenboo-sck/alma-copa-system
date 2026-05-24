@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
+const hasStripePublishableKey = Boolean(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+);
+
 type CheckoutButtonProps = {
   eventId: string;
   amount?: number;
@@ -29,6 +33,11 @@ export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) 
   }, [toast]);
 
   async function startCheckout() {
+    if (!hasStripePublishableKey) {
+      setError("Stripe公開キーが未設定です。NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEYを確認してください。");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setToast("Stripe Checkoutを準備しています。");

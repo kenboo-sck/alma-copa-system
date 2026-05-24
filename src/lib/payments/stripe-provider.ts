@@ -11,20 +11,17 @@ import type {
 } from "./types";
 import { getSiteUrl } from "@/lib/site-url";
 
-const requiredStripeKeys = [
-  "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
-  "STRIPE_SECRET_KEY",
-] as const;
+const requiredStripeKeys = ["STRIPE_SECRET_KEY"] as const;
 
 function getStripeEnvironmentStatus(): PaymentEnvironmentStatus {
-  const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   const secretKey = process.env.STRIPE_SECRET_KEY;
+  const testMode = process.env.NEXT_PUBLIC_STRIPE_TEST_MODE === "true";
 
   const missingKeys = requiredStripeKeys.filter((key) => !process.env[key]);
   const warnings: string[] = [];
 
-  if (publishableKey && !publishableKey.startsWith("pk_test_")) {
-    warnings.push("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY がテストキーではありません。");
+  if (!testMode) {
+    warnings.push("NEXT_PUBLIC_STRIPE_TEST_MODE が true ではありません。");
   }
 
   if (secretKey && !secretKey.startsWith("sk_test_")) {
@@ -33,9 +30,7 @@ function getStripeEnvironmentStatus(): PaymentEnvironmentStatus {
 
   return {
     isConfigured: missingKeys.length === 0,
-    isTestMode:
-      Boolean(publishableKey?.startsWith("pk_test_")) &&
-      Boolean(secretKey?.startsWith("sk_test_")),
+    isTestMode: testMode && Boolean(secretKey?.startsWith("sk_test_")),
     missingKeys,
     warnings,
   };

@@ -40,6 +40,10 @@ import {
 } from "@/features/events/public-event-utils";
 import type { EntryType } from "@/types/entry";
 
+const hasStripePublishableKey = Boolean(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+);
+
 const athleteSchema = z.object({
   name: z.string().min(1, "氏名を入力してください。").max(50),
   kana: z.string().min(1, "フリガナを入力してください。").max(80),
@@ -382,6 +386,11 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
   }, [toast]);
 
   async function submitEntry(values: EntryCheckoutValues) {
+    if (!hasStripePublishableKey) {
+      setError("Stripe公開キーが未設定です。NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEYを確認してください。");
+      return;
+    }
+
     if (!event) {
       setError(eventError ?? "大会情報を読み込めませんでした。");
       return;
