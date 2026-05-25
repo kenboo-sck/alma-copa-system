@@ -1,6 +1,11 @@
 import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore/lite";
 
-import { emailService } from "@/lib/email";
+import { EmailProviderError, emailService } from "@/lib/email";
+import {
+  buildBodyPreview,
+  createPublicMailLog,
+  toMailLogProvider,
+} from "@/lib/email/mail-logs";
 import { collections } from "@/lib/firebase/collections";
 import { getPublicFirestore } from "@/lib/firebase/public-firestore";
 import { paymentService } from "@/lib/payments";
@@ -43,15 +48,12 @@ async function getEntryEmailPayload(
   const snapshot = event.entryId
     ? await getDoc(doc(db, collections.entries, event.entryId)).catch(() => null)
     : null;
-  const data = snapshot?.exists()
-    ? (snapshot.data() as Record<string, unknown>)
-    : {};
+  const data = snapshot?.exists() ? (snapshot.data() as Record<string, unknown>) : {};
 
   const eventId =
     event.eventId ?? (typeof data.eventId === "string" ? data.eventId : "");
   const eventTitle =
-    event.eventTitle ??
-    (typeof data.eventTitle === "string" ? data.eventTitle : "");
+    event.eventTitle ?? (typeof data.eventTitle === "string" ? data.eventTitle : "");
   const entryType =
     event.entryType ??
     (data.entryType === "individual" || data.entryType === "representative"
@@ -134,6 +136,29 @@ async function sendEntryEmailsAfterPayment(
 
   try {
     const results = await emailService.sendEntryEmails(payload);
+    const messages = emailService.getEntryEmailMessages(payload);
+
+    await Promise.allSettled(
+      messages.map((message) =>
+        createPublicMailLog(db, {
+          entryId: payload.entryId,
+          eventId: payload.eventId,
+          eventTitle: payload.eventTitle,
+          recipientEmail: message.recipientEmail,
+          recipientName: message.recipientName,
+          recipientType: message.recipientType,
+          mailType: "entry_completed",
+          subject: message.subject,
+          bodyPreview: buildBodyPreview(message.text),
+          status: "sent",
+          errorMessage: null,
+          provider: toMailLogProvider(status.provider),
+          createdByAdminUid: null,
+          createdByAdminEmail: null,
+        }),
+      ),
+    );
+
     console.info("Stripe webhook entry emails sent", {
       entryId: payload.entryId,
       eventId: payload.eventId,
@@ -144,6 +169,40 @@ async function sendEntryEmailsAfterPayment(
       results,
     });
   } catch (error) {
+    const failedRecipient =
+      error instanceof EmailProviderError
+        ? error.details.recipient
+        : payload.applicantEmail;
+    const failedMessage = emailService
+      .getEntryEmailMessages(payload)
+      .find((message) => message.recipientEmail === failedRecipient);
+
+    if (failedMessage) {
+      await createPublicMailLog(db, {
+        entryId: payload.entryId,
+        eventId: payload.eventId,
+        eventTitle: payload.eventTitle,
+        recipientEmail: failedMessage.recipientEmail,
+        recipientName: failedMessage.recipientName,
+        recipientType: failedMessage.recipientType,
+        mailType: "entry_completed",
+        subject: failedMessage.subject,
+        bodyPreview: buildBodyPreview(failedMessage.text),
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        provider: toMailLogProvider(status.provider),
+        createdByAdminUid: null,
+        createdByAdminEmail: null,
+      }).catch((logError) => {
+        console.error("Stripe webhook entry email failure log write failed", {
+          entryId: payload.entryId,
+          eventId: payload.eventId,
+          recipient: failedMessage.recipientEmail,
+          error: logError,
+        });
+      });
+    }
+
     console.error("Stripe webhook entry emails failed", {
       entryId: payload.entryId,
       eventId: payload.eventId,

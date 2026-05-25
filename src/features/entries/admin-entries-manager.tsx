@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
+import { useAdminAuth } from "@/features/admin-auth";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import type { EntryType, ReceptionStatus } from "@/types/entry";
@@ -116,6 +117,38 @@ function csvCell(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+async function sendIndividualEmail(input: {
+  token: string;
+  entryId: string;
+  subject: string;
+  body: string;
+}) {
+  const response = await fetch("/api/admin/emails/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mailType: "manual_individual",
+      subject: input.subject,
+      body: input.body,
+      recipients: [{ entryId: input.entryId }],
+    }),
+  });
+  const data = (await response.json().catch(() => null)) as {
+    error?: string;
+    sentCount?: number;
+    failedCount?: number;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? "メール送信に失敗しました。");
+  }
+
+  return data;
+}
+
 type AdminEntriesManagerProps = {
   eyebrow?: string;
   title?: string;
@@ -127,6 +160,7 @@ export function AdminEntriesManager({
   title = "エントリー",
   description = "申込者情報、決済状態、受付状態を確認・管理します。",
 }: AdminEntriesManagerProps = {}) {
+  const { firebaseUser } = useAdminAuth();
   const [entries, setEntries] = useState<AdminEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +170,11 @@ export function AdminEntriesManager({
     useState<PaymentStatusFilter>("all");
   const [eventFilter, setEventFilter] = useState("all");
   const [qrEntry, setQrEntry] = useState<AdminEntry | null>(null);
+  const [mailEntry, setMailEntry] = useState<AdminEntry | null>(null);
+  const [mailSubject, setMailSubject] = useState("");
+  const [mailBody, setMailBody] = useState("");
+  const [mailError, setMailError] = useState<string | null>(null);
+  const [isSendingMail, setIsSendingMail] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -333,6 +372,66 @@ export function AdminEntriesManager({
     }
   }
 
+  function openMailModal(entry: AdminEntry) {
+    setMailEntry(entry);
+    setMailError(null);
+    setMailSubject(`【ALMA COPA】${entry.eventTitle}について`);
+    setMailBody(`${entry.name} 様\n\nALMA COPA 運営事務局です。\n\n`);
+  }
+
+  async function handleIndividualMailSend() {
+    if (!mailEntry) {
+      return;
+    }
+
+    const subject = mailSubject.trim();
+    const body = mailBody.trim();
+
+    if (!subject || !body) {
+      setMailError("件名と本文を入力してください。");
+      return;
+    }
+
+    const confirmed = window.confirm("この内容でメールを送信します。よろしいですか？");
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMailError(null);
+    setIsSendingMail(true);
+
+    try {
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error("管理者認証を確認できませんでした。");
+      }
+
+      const result = await sendIndividualEmail({
+        token,
+        entryId: mailEntry.id,
+        subject,
+        body,
+      });
+
+      if ((result?.failedCount ?? 0) > 0) {
+        throw new Error("メール送信に失敗しました。メール履歴を確認してください。");
+      }
+
+      setToast("メールを送信しました。");
+      setMailEntry(null);
+    } catch (caughtError) {
+      console.error(caughtError);
+      setMailError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "メール送信に失敗しました。",
+      );
+    } finally {
+      setIsSendingMail(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -448,7 +547,7 @@ export function AdminEntriesManager({
                     </dd>
                   </div>
                 </dl>
-                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className="mt-4 grid gap-2 sm:grid-cols-4">
                   <button
                     type="button"
                     onClick={() => void toggleReception(entry)}
@@ -462,6 +561,13 @@ export function AdminEntriesManager({
                     className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
                   >
                     QR表示
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openMailModal(entry)}
+                    className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                  >
+                    メール
                   </button>
                   <button
                     type="button"
@@ -533,6 +639,13 @@ export function AdminEntriesManager({
                           </button>
                           <button
                             type="button"
+                            onClick={() => openMailModal(entry)}
+                            className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                          >
+                            メール
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => void deleteEntry(entry)}
                             className="rounded-md border border-red-800/70 px-2 py-1.5 text-xs text-red-200 hover:border-red-500 hover:text-red-100"
                           >
@@ -569,6 +682,73 @@ export function AdminEntriesManager({
             >
               閉じる
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {mailEntry ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-lg border border-alma-gold/40 bg-zinc-950 p-5 shadow-2xl shadow-black">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-alma-gold">個別メール</p>
+                <h2 className="mt-2 text-lg font-bold text-white">{mailEntry.name}</h2>
+                <p className="mt-1 break-all text-sm text-zinc-400">
+                  {mailEntry.email}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMailEntry(null)}
+                className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-300 hover:text-white"
+              >
+                キャンセル
+              </button>
+            </div>
+
+            {mailError ? (
+              <div className="mt-4 rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100">
+                {mailError}
+              </div>
+            ) : null}
+
+            <div className="mt-5 space-y-4">
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-zinc-400">件名</span>
+                <input
+                  value={mailSubject}
+                  onChange={(event) => setMailSubject(event.target.value)}
+                  className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+                />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-zinc-400">本文</span>
+                <textarea
+                  value={mailBody}
+                  onChange={(event) => setMailBody(event.target.value)}
+                  rows={9}
+                  className="w-full rounded-md border border-white/10 bg-black px-3 py-3 text-sm leading-6 text-white outline-none focus:border-alma-gold"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setMailEntry(null)}
+                className="min-h-11 rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-300 hover:text-white"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleIndividualMailSend()}
+                disabled={isSendingMail || !mailSubject.trim() || !mailBody.trim()}
+                className="min-h-11 rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSendingMail ? "送信中..." : "送信"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

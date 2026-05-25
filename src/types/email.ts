@@ -1,10 +1,23 @@
-export type EmailStatus = "queued" | "sent" | "failed";
+export type EmailStatus = "sent" | "failed";
+export type EmailRecipientType = "user" | "admin";
+export type EmailMailType = "entry_completed" | "manual_individual" | "manual_bulk";
 
 export type EmailLogDocument = {
-  eventId: string;
-  entryId?: string;
-  to: string[];
+  logId: string;
+  entryId: string | null;
+  eventId: string | null;
+  eventTitle: string | null;
+  recipientEmail: string;
+  recipientName: string;
+  recipientType: EmailRecipientType;
+  mailType: EmailMailType;
   subject: string;
-  templateType: string;
+  bodyPreview: string;
   status: EmailStatus;
+  errorMessage: string | null;
+  provider: string;
+  sentAt: Date;
+  createdAt: Date;
+  createdByAdminUid: string | null;
+  createdByAdminEmail: string | null;
 };

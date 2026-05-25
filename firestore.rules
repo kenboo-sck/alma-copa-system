@@ -270,6 +270,54 @@ service cloud.firestore {
         && entryId == resource.data.eventId + "_" + resource.data.normalizedEmail;
     }
 
+    function mailLogKeysAllowed(data) {
+      return data.keys().hasOnly([
+        "logId",
+        "entryId",
+        "eventId",
+        "eventTitle",
+        "recipientEmail",
+        "recipientName",
+        "recipientType",
+        "mailType",
+        "subject",
+        "bodyPreview",
+        "status",
+        "errorMessage",
+        "provider",
+        "sentAt",
+        "createdAt",
+        "createdByAdminUid",
+        "createdByAdminEmail"
+      ]);
+    }
+
+    function publicEntryCompletedMailLogCreateAllowed(logId) {
+      return mailLogKeysAllowed(request.resource.data)
+        && request.resource.data.logId == logId
+        && request.resource.data.entryId is string
+        && exists(/databases/$(database)/documents/entries/$(request.resource.data.entryId))
+        && confirmedPaidEntry(get(/databases/$(database)/documents/entries/$(request.resource.data.entryId)).data)
+        && request.resource.data.eventId == get(/databases/$(database)/documents/entries/$(request.resource.data.entryId)).data.eventId
+        && request.resource.data.eventTitle == get(/databases/$(database)/documents/entries/$(request.resource.data.entryId)).data.eventTitle
+        && request.resource.data.recipientEmail is string
+        && request.resource.data.recipientName is string
+        && request.resource.data.recipientType in ["user", "admin"]
+        && request.resource.data.mailType == "entry_completed"
+        && request.resource.data.subject is string
+        && request.resource.data.bodyPreview is string
+        && request.resource.data.status in ["sent", "failed"]
+        && (
+          request.resource.data.errorMessage == null
+          || request.resource.data.errorMessage is string
+        )
+        && request.resource.data.provider in ["php-mail-api", "resend"]
+        && request.resource.data.sentAt == request.time
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdByAdminUid == null
+        && request.resource.data.createdByAdminEmail == null;
+    }
+
     function publicEntryReplaceAllowed() {
       return publicEntryCreateAllowed()
         && !confirmedPaidEntry(resource.data);
@@ -303,6 +351,12 @@ service cloud.firestore {
     match /adminUsers/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
+    }
+
+    match /emailLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() || publicEntryCompletedMailLogCreateAllowed(logId);
+      allow update, delete: if isAdmin();
     }
 
     match /{document=**} {

@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { EmailSendResult, EntryEmailPayload } from "./types";
+import type { EmailSendResult, EntryEmailMessage, EntryEmailPayload } from "./types";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 const DEFAULT_MAIL_PROVIDER = "resend";
@@ -43,6 +43,10 @@ function escapeHtml(value: string) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function textToHtml(value: string) {
+  return escapeHtml(value).replaceAll("\n", "<br>");
 }
 
 function parseJsonBody(value: string) {
@@ -301,6 +305,77 @@ function buildAdminEmail(payload: EntryEmailPayload) {
   return { subject, text, html };
 }
 
+function buildEntryEmailMessages(payload: EntryEmailPayload): EntryEmailMessage[] {
+  const adminEmail = getAdminEmail();
+  const applicant = buildApplicantEmail(payload);
+  const admin = buildAdminEmail(payload);
+
+  return [
+    {
+      recipientEmail: payload.applicantEmail,
+      recipientName: payload.applicantName,
+      recipientType: "user",
+      ...applicant,
+    },
+    {
+      recipientEmail: adminEmail,
+      recipientName: "ALMA COPA 管理者",
+      recipientType: "admin",
+      ...admin,
+    },
+  ];
+}
+
+function buildManualEmail(input: { subject: string; body: string }) {
+  const escapedSubject = escapeHtml(input.subject);
+  const htmlBody = textToHtml(input.body);
+  const html = `
+    <!doctype html>
+    <html lang="ja">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${escapedSubject}</title>
+      </head>
+      <body style="margin:0;padding:0;background-color:#090909;color:#f7f3e8;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background-color:#090909;border-collapse:collapse;">
+          <tr>
+            <td align="center" style="padding:28px 12px;">
+              <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;">
+                <tr>
+                  <td style="padding:0 0 16px 0;text-align:center;">
+                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">ALMA COPA</div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background-color:#111111;border:1px solid #3a2f18;border-radius:14px;overflow:hidden;">
+                    <div style="height:4px;background-color:#d6b25e;font-size:0;line-height:0;">&nbsp;</div>
+                    <div style="padding:28px 26px;">
+                      <h1 style="margin:0;color:#ffffff;font-size:24px;line-height:1.4;font-weight:700;">${escapedSubject}</h1>
+                      <div style="margin-top:20px;color:#d9d2c2;font-size:15px;line-height:1.9;">${htmlBody}</div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:18px 8px 0 8px;text-align:center;color:#8f8776;font-size:12px;line-height:1.8;">
+                    ALMA COPA 運営事務局
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+
+  return {
+    subject: input.subject,
+    text: input.body,
+    html,
+  };
+}
+
 export class EmailProviderError extends Error {
   constructor(
     message: string,
@@ -427,21 +502,20 @@ async function sendPhpEmail(
 async function sendPhpEntryEmails(
   payload: EntryEmailPayload,
 ): Promise<EmailSendResult[]> {
-  const adminEmail = getAdminEmail();
-  const applicant = buildApplicantEmail(payload);
-  const admin = buildAdminEmail(payload);
+  const messages = buildEntryEmailMessages(payload);
 
   const results: EmailSendResult[] = [];
 
-  results.push(
-    await sendPhpEmail(
-      payload.applicantEmail,
-      applicant.subject,
-      applicant.text,
-      applicant.html,
-    ),
-  );
-  results.push(await sendPhpEmail(adminEmail, admin.subject, admin.text, admin.html));
+  for (const message of messages) {
+    results.push(
+      await sendPhpEmail(
+        message.recipientEmail,
+        message.subject,
+        message.text,
+        message.html,
+      ),
+    );
+  }
 
   return results;
 }
@@ -449,6 +523,10 @@ async function sendPhpEntryEmails(
 export class EmailService {
   getEnvironmentStatus() {
     return getEnvironmentStatus();
+  }
+
+  getEntryEmailMessages(payload: EntryEmailPayload) {
+    return buildEntryEmailMessages(payload);
   }
 
   async sendEntryEmails(payload: EntryEmailPayload): Promise<EmailSendResult[]> {
@@ -469,24 +547,57 @@ export class EmailService {
       return sendPhpEntryEmails(payload);
     }
 
-    const applicant = buildApplicantEmail(payload);
-    const admin = buildAdminEmail(payload);
+    const messages = buildEntryEmailMessages(payload);
 
     const results: EmailSendResult[] = [];
 
-    results.push(
-      await sendSingleEmail(
-        payload.applicantEmail,
-        applicant.subject,
-        applicant.text,
-        applicant.html,
-      ),
-    );
-    results.push(
-      await sendSingleEmail(adminEmail, admin.subject, admin.text, admin.html),
-    );
+    for (const message of messages) {
+      results.push(
+        await sendSingleEmail(
+          message.recipientEmail,
+          message.subject,
+          message.text,
+          message.html,
+        ),
+      );
+    }
 
     return results;
+  }
+
+  async sendManualEmail(input: {
+    recipientEmail: string;
+    subject: string;
+    body: string;
+  }): Promise<EmailSendResult> {
+    const status = this.getEnvironmentStatus();
+
+    if (!status.isConfigured) {
+      throw new Error(
+        `Email service is not configured. Missing: ${status.missingKeys.join(", ")}`,
+      );
+    }
+
+    const message = buildManualEmail({
+      subject: input.subject,
+      body: input.body,
+    });
+
+    if (status.provider === "php") {
+      return sendPhpEmail(
+        input.recipientEmail,
+        message.subject,
+        message.text,
+        message.html,
+      );
+    }
+
+    return sendSingleEmail(
+      input.recipientEmail,
+      message.subject,
+      message.text,
+      message.html,
+    );
   }
 }
 

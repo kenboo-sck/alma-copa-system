@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 import { EmailProviderError, emailService } from "@/lib/email";
+import {
+  buildBodyPreview,
+  createPublicMailLog,
+  toMailLogProvider,
+} from "@/lib/email/mail-logs";
+import { getPublicFirestore } from "@/lib/firebase/public-firestore";
 
 export const runtime = "nodejs";
 
@@ -92,6 +98,39 @@ export async function POST(request: Request) {
 
   try {
     const results = await emailService.sendEntryEmails(parsed.data);
+    const db = getPublicFirestore();
+    const messages = emailService.getEntryEmailMessages(parsed.data);
+
+    const logResults = await Promise.allSettled(
+      messages.map((message) =>
+        createPublicMailLog(db, {
+          entryId: parsed.data.entryId,
+          eventId: parsed.data.eventId,
+          eventTitle: parsed.data.eventTitle,
+          recipientEmail: message.recipientEmail,
+          recipientName: message.recipientName,
+          recipientType: message.recipientType,
+          mailType: "entry_completed",
+          subject: message.subject,
+          bodyPreview: buildBodyPreview(message.text),
+          status: "sent",
+          errorMessage: null,
+          provider: toMailLogProvider(status.provider),
+          createdByAdminUid: null,
+          createdByAdminEmail: null,
+        }),
+      ),
+    );
+
+    for (const logResult of logResults) {
+      if (logResult.status === "rejected") {
+        console.error("Entry email sent log write failed", {
+          entryId: parsed.data.entryId,
+          eventId: parsed.data.eventId,
+          error: logResult.reason,
+        });
+      }
+    }
 
     console.info("Entry emails sent successfully", {
       entryId: parsed.data.entryId,
@@ -111,6 +150,41 @@ export async function POST(request: Request) {
       phpMailApiUrl: status.phpMailApiUrl,
     });
   } catch (error) {
+    const db = getPublicFirestore();
+    const failedRecipient =
+      error instanceof EmailProviderError
+        ? error.details.recipient
+        : parsed.data.applicantEmail;
+    const failedMessage = emailService
+      .getEntryEmailMessages(parsed.data)
+      .find((message) => message.recipientEmail === failedRecipient);
+
+    if (failedMessage) {
+      await createPublicMailLog(db, {
+        entryId: parsed.data.entryId,
+        eventId: parsed.data.eventId,
+        eventTitle: parsed.data.eventTitle,
+        recipientEmail: failedMessage.recipientEmail,
+        recipientName: failedMessage.recipientName,
+        recipientType: failedMessage.recipientType,
+        mailType: "entry_completed",
+        subject: failedMessage.subject,
+        bodyPreview: buildBodyPreview(failedMessage.text),
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        provider: toMailLogProvider(status.provider),
+        createdByAdminUid: null,
+        createdByAdminEmail: null,
+      }).catch((logError) => {
+        console.error("Entry email failure log write failed", {
+          entryId: parsed.data.entryId,
+          eventId: parsed.data.eventId,
+          recipient: failedMessage.recipientEmail,
+          error: logError,
+        });
+      });
+    }
+
     console.error("Entry email sending failed", {
       error,
       entryId: parsed.data.entryId,

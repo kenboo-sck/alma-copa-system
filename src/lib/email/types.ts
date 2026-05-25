@@ -6,6 +6,17 @@ export type EmailSendResult = {
   error?: string;
 };
 
+export type EmailRecipientType = "user" | "admin";
+
+export type EntryEmailMessage = {
+  recipientEmail: string;
+  recipientName: string;
+  recipientType: EmailRecipientType;
+  subject: string;
+  text: string;
+  html: string;
+};
+
 export type EntryEmailPayload = {
   entryId: string;
   eventId: string;
