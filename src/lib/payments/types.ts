@@ -22,6 +22,7 @@ export type CreateCheckoutSessionInput = {
   itemName: string;
   customerEmail?: string;
   email?: string;
+  applicantName?: string;
   successUrl?: string;
   cancelUrl?: string;
 };
@@ -31,6 +32,9 @@ export type StripeWebhookEventResult = {
   entryId?: string;
   eventId?: string;
   email?: string;
+  applicantName?: string;
+  eventTitle?: string;
+  entryType?: "individual" | "representative";
   sessionId?: string;
   paymentIntentId?: string;
 };

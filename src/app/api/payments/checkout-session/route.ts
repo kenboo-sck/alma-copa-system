@@ -793,6 +793,7 @@ export async function POST(request: Request) {
       currency: parsed.data.currency,
       itemName: parsed.data.itemName,
       email: parsed.data.email,
+      applicantName: parsed.data.name,
       customerEmail: parsed.data.customerEmail ?? parsed.data.email,
       successUrl,
       cancelUrl,

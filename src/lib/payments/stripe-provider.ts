@@ -109,6 +109,7 @@ export class StripeProvider {
         eventTitle: input.eventTitle,
         entryType: input.entryType ?? "",
         email: input.email ?? input.customerEmail ?? "",
+        applicantName: input.applicantName ?? "",
       },
       payment_intent_data: {
         metadata: {
@@ -117,6 +118,7 @@ export class StripeProvider {
           eventTitle: input.eventTitle,
           entryType: input.entryType ?? "",
           email: input.email ?? input.customerEmail ?? "",
+          applicantName: input.applicantName ?? "",
         },
       },
     });
@@ -175,12 +177,19 @@ export class StripeProvider {
       event.type === "checkout.session.async_payment_failed"
     ) {
       const session = event.data.object;
+      const entryType = session.metadata?.entryType;
 
       return {
         type: event.type,
         entryId: session.metadata?.entryId,
         eventId: session.metadata?.eventId,
         email: session.metadata?.email,
+        applicantName: session.metadata?.applicantName,
+        eventTitle: session.metadata?.eventTitle,
+        entryType:
+          entryType === "individual" || entryType === "representative"
+            ? entryType
+            : undefined,
         sessionId: session.id,
         paymentIntentId:
           typeof session.payment_intent === "string"
@@ -191,12 +200,19 @@ export class StripeProvider {
 
     if (event.type === "payment_intent.payment_failed") {
       const paymentIntent = event.data.object;
+      const entryType = paymentIntent.metadata?.entryType;
 
       return {
         type: event.type,
         entryId: paymentIntent.metadata?.entryId,
         eventId: paymentIntent.metadata?.eventId,
         email: paymentIntent.metadata?.email,
+        applicantName: paymentIntent.metadata?.applicantName,
+        eventTitle: paymentIntent.metadata?.eventTitle,
+        entryType:
+          entryType === "individual" || entryType === "representative"
+            ? entryType
+            : undefined,
         paymentIntentId: paymentIntent.id,
       };
     }

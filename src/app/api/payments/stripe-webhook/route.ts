@@ -1,8 +1,10 @@
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore/lite";
+import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore/lite";
 
+import { emailService } from "@/lib/email";
 import { collections } from "@/lib/firebase/collections";
 import { getPublicFirestore } from "@/lib/firebase/public-firestore";
 import { paymentService } from "@/lib/payments";
+import type { StripeWebhookEventResult } from "@/lib/payments/types";
 
 export const runtime = "nodejs";
 
@@ -32,6 +34,132 @@ function logWebhookEvent(
           }
         : (details.error ?? null),
   });
+}
+
+async function getEntryEmailPayload(
+  db: ReturnType<typeof getPublicFirestore>,
+  event: StripeWebhookEventResult,
+) {
+  const snapshot = event.entryId
+    ? await getDoc(doc(db, collections.entries, event.entryId)).catch(() => null)
+    : null;
+  const data = snapshot?.exists()
+    ? (snapshot.data() as Record<string, unknown>)
+    : {};
+
+  const eventId =
+    event.eventId ?? (typeof data.eventId === "string" ? data.eventId : "");
+  const eventTitle =
+    event.eventTitle ??
+    (typeof data.eventTitle === "string" ? data.eventTitle : "");
+  const entryType =
+    event.entryType ??
+    (data.entryType === "individual" || data.entryType === "representative"
+      ? data.entryType
+      : undefined);
+  const applicantName =
+    event.applicantName ?? (typeof data.name === "string" ? data.name : "");
+  const applicantEmail =
+    event.email ?? (typeof data.email === "string" ? data.email : "");
+
+  if (
+    !event.entryId ||
+    !eventId ||
+    !eventTitle ||
+    !entryType ||
+    !applicantName ||
+    !applicantEmail
+  ) {
+    return null;
+  }
+
+  return {
+    entryId: event.entryId,
+    eventId,
+    eventTitle,
+    entryType,
+    applicantName,
+    applicantEmail,
+    paymentStatus: "paid" as const,
+    sessionId: event.sessionId,
+  };
+}
+
+async function sendEntryEmailsAfterPayment(
+  db: ReturnType<typeof getPublicFirestore>,
+  event: StripeWebhookEventResult,
+) {
+  const status = emailService.getEnvironmentStatus();
+  console.info("Stripe webhook entry email send started", {
+    type: event.type,
+    sessionId: event.sessionId ?? null,
+    entryId: event.entryId ?? null,
+    eventId: event.eventId ?? null,
+    provider: status.provider,
+    isConfigured: status.isConfigured,
+    missingKeys: status.missingKeys,
+    warnings: status.warnings,
+    phpMailApiUrl: status.phpMailApiUrl,
+  });
+
+  const payload = await getEntryEmailPayload(db, event);
+  if (!payload) {
+    console.error("Stripe webhook entry email payload missing", {
+      type: event.type,
+      sessionId: event.sessionId ?? null,
+      entryId: event.entryId ?? null,
+      eventId: event.eventId ?? null,
+      hasEventTitle: Boolean(event.eventTitle),
+      hasEntryType: Boolean(event.entryType),
+      hasApplicantName: Boolean(event.applicantName),
+      hasApplicantEmail: Boolean(event.email),
+      provider: status.provider,
+      phpMailApiUrl: status.phpMailApiUrl,
+    });
+    return;
+  }
+
+  if (!status.isConfigured) {
+    console.error("Stripe webhook entry email service is not configured", {
+      entryId: payload.entryId,
+      eventId: payload.eventId,
+      sessionId: payload.sessionId ?? null,
+      provider: status.provider,
+      missingKeys: status.missingKeys,
+      warnings: status.warnings,
+      phpMailApiUrl: status.phpMailApiUrl,
+    });
+    return;
+  }
+
+  try {
+    const results = await emailService.sendEntryEmails(payload);
+    console.info("Stripe webhook entry emails sent", {
+      entryId: payload.entryId,
+      eventId: payload.eventId,
+      sessionId: payload.sessionId ?? null,
+      provider: status.provider,
+      phpMailApiUrl: status.phpMailApiUrl,
+      recipients: results.map((result) => result.recipient),
+      results,
+    });
+  } catch (error) {
+    console.error("Stripe webhook entry emails failed", {
+      entryId: payload.entryId,
+      eventId: payload.eventId,
+      sessionId: payload.sessionId ?? null,
+      provider: status.provider,
+      phpMailApiUrl: status.phpMailApiUrl,
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : error,
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -92,6 +220,8 @@ export async function POST(request: Request) {
           sessionId: event.sessionId ?? null,
           paymentIntentId: event.paymentIntentId ?? null,
         });
+
+        await sendEntryEmailsAfterPayment(db, event);
       } catch (error) {
         logWebhookEvent("Stripe webhook entry update failed", {
           type: event.type,
