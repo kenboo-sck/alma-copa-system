@@ -7,9 +7,7 @@ function useParallaxOffset() {
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     if (reduceMotion) {
       return undefined;
@@ -49,7 +47,7 @@ export function SiteHero() {
         className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat"
         style={{
           backgroundImage:
-            "linear-gradient(180deg,rgba(0,0,0,0.06),rgba(0,0,0,0.32)), url('/images/hero-jiujitsu.jpg')",
+            "linear-gradient(180deg,rgba(0,0,0,0.06),rgba(0,0,0,0.32)), url('/images/entry-select-hero.png')",
           transform: `translate3d(0, ${offset * 0.25}px, 0) scale(1.08)`,
           backgroundPosition: "center 28%",
           willChange: "transform",
@@ -75,8 +73,8 @@ export function SiteHero() {
             ELEVATE YOUR JIU-JITSU.
           </p>
           <p className="mt-4 max-w-xl text-sm leading-7 text-zinc-300 sm:text-base sm:leading-8">
-            すべての挑戦者に、最高の舞台を。
-            ALMA COPAは、ブラジリアン柔術の緊張感とリスペクトを体現する大会エントリーサイトです。
+            すべての挑戦者に、最高の舞台を。 ALMA
+            COPAは、ブラジリアン柔術の緊張感とリスペクトを体現する大会エントリーサイトです。
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
