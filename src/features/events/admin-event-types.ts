@@ -20,6 +20,14 @@ export type AdminEvent = {
   status: EventStatus;
   imageUrl: string;
   imagePath: string;
+  aboutSection: {
+    enabled: boolean;
+    concept: string;
+    level: string;
+    classes: string;
+    atmosphere: string;
+    beginnerWelcome: string;
+  };
   createdAt: Date | null;
   updatedAt: Date | null;
   entryCount: number;
@@ -42,6 +50,14 @@ export type EventFormValues = {
   lateStartAt: string;
   lateEndAt: string;
   status: EventStatus;
+  aboutSection: {
+    enabled: "true" | "false";
+    concept: string;
+    level: string;
+    classes: string;
+    atmosphere: string;
+    beginnerWelcome: string;
+  };
 };
 
 export type EventStatusFilter = "all" | EventStatus;
@@ -54,11 +70,9 @@ export const eventStatusLabels: Record<EventStatus, string> = {
   closed: "受付終了",
 };
 
-export const eventStatusTones: Record<
-  EventStatus,
-  "neutral" | "success" | "warning"
-> = {
-  draft: "neutral",
-  published: "success",
-  closed: "warning",
-};
+export const eventStatusTones: Record<EventStatus, "neutral" | "success" | "warning"> =
+  {
+    draft: "neutral",
+    published: "success",
+    closed: "warning",
+  };

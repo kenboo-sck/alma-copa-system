@@ -24,6 +24,14 @@ export type PublicEvent = {
   lateStartAt: Date | null;
   lateEndAt: Date | null;
   status: EventStatus;
+  aboutSection: {
+    enabled: boolean;
+    concept: string;
+    level: string;
+    classes: string;
+    atmosphere: string;
+    beginnerWelcome: string;
+  };
 };
 
 export type PriceType = "early" | "regular" | "late";
@@ -60,6 +68,11 @@ export function toDate(value: unknown): Date | null {
 }
 
 export function mapPublicEvent(id: string, data: DocumentData): PublicEvent {
+  const aboutSection: Record<string, unknown> =
+    data.aboutSection && typeof data.aboutSection === "object"
+      ? (data.aboutSection as Record<string, unknown>)
+      : {};
+
   return {
     id,
     title: typeof data.title === "string" ? data.title : "",
@@ -89,6 +102,18 @@ export function mapPublicEvent(id: string, data: DocumentData): PublicEvent {
     lateEndAt: toDate(data.lateEndAt),
     status:
       data.status === "published" || data.status === "closed" ? data.status : "draft",
+    aboutSection: {
+      enabled: aboutSection.enabled === true,
+      concept: typeof aboutSection.concept === "string" ? aboutSection.concept : "",
+      level: typeof aboutSection.level === "string" ? aboutSection.level : "",
+      classes: typeof aboutSection.classes === "string" ? aboutSection.classes : "",
+      atmosphere:
+        typeof aboutSection.atmosphere === "string" ? aboutSection.atmosphere : "",
+      beginnerWelcome:
+        typeof aboutSection.beginnerWelcome === "string"
+          ? aboutSection.beginnerWelcome
+          : "",
+    },
   };
 }
 

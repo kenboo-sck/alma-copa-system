@@ -24,6 +24,16 @@ export const eventFormSchema = z
     lateStartAt: z.string().min(1, "最終価格開始日を入力してください。"),
     lateEndAt: z.string().min(1, "最終価格終了日を入力してください。"),
     status: z.enum(["draft", "published", "closed"]),
+    aboutSection: z.object({
+      enabled: z.enum(["true", "false"]),
+      concept: z.string().max(1200, "大会コンセプトは1200文字以内で入力してください。"),
+      level: z.string().max(1200, "レベルは1200文字以内で入力してください。"),
+      classes: z.string().max(1200, "クラスは1200文字以内で入力してください。"),
+      atmosphere: z.string().max(1200, "雰囲気は1200文字以内で入力してください。"),
+      beginnerWelcome: z
+        .string()
+        .max(1200, "初参加歓迎は1200文字以内で入力してください。"),
+    }),
   })
   .refine((value) => Number(value.earlyBirdPrice) > 0, {
     message: "早期割引価格は1円以上で入力してください。",
@@ -48,13 +58,10 @@ export const eventFormSchema = z
       path: ["earlyBirdEndAt"],
     },
   )
-  .refine(
-    (value) => new Date(value.regularEndAt) > new Date(value.regularStartAt),
-    {
-      message: "通常価格終了日は開始日より後にしてください。",
-      path: ["regularEndAt"],
-    },
-  )
+  .refine((value) => new Date(value.regularEndAt) > new Date(value.regularStartAt), {
+    message: "通常価格終了日は開始日より後にしてください。",
+    path: ["regularEndAt"],
+  })
   .refine((value) => new Date(value.lateEndAt) > new Date(value.lateStartAt), {
     message: "最終価格終了日は開始日より後にしてください。",
     path: ["lateEndAt"],
@@ -77,6 +84,14 @@ export const defaultEventFormValues: EventFormValues = {
   lateStartAt: "",
   lateEndAt: "",
   status: "draft",
+  aboutSection: {
+    enabled: "false",
+    concept: "",
+    level: "",
+    classes: "",
+    atmosphere: "",
+    beginnerWelcome: "",
+  },
 };
 
 export function toDate(value: unknown): Date | null {
@@ -146,7 +161,16 @@ export function toDateTimeInputValue(value: Date | null) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
-export function mapEventData(id: string, data: DocumentData, entryCount = 0): AdminEvent {
+export function mapEventData(
+  id: string,
+  data: DocumentData,
+  entryCount = 0,
+): AdminEvent {
+  const aboutSection: Record<string, unknown> =
+    data.aboutSection && typeof data.aboutSection === "object"
+      ? (data.aboutSection as Record<string, unknown>)
+      : {};
+
   return {
     id,
     title: typeof data.title === "string" ? data.title : "",
@@ -174,6 +198,18 @@ export function mapEventData(id: string, data: DocumentData, entryCount = 0): Ad
           ? data.heroImage
           : "",
     imagePath: typeof data.imagePath === "string" ? data.imagePath : "",
+    aboutSection: {
+      enabled: aboutSection.enabled === true,
+      concept: typeof aboutSection.concept === "string" ? aboutSection.concept : "",
+      level: typeof aboutSection.level === "string" ? aboutSection.level : "",
+      classes: typeof aboutSection.classes === "string" ? aboutSection.classes : "",
+      atmosphere:
+        typeof aboutSection.atmosphere === "string" ? aboutSection.atmosphere : "",
+      beginnerWelcome:
+        typeof aboutSection.beginnerWelcome === "string"
+          ? aboutSection.beginnerWelcome
+          : "",
+    },
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
     entryCount,
@@ -198,6 +234,14 @@ export function createEventPayload(values: EventFormValues) {
     lateStartAt: Timestamp.fromDate(new Date(values.lateStartAt)),
     lateEndAt: Timestamp.fromDate(new Date(values.lateEndAt)),
     status: values.status,
+    aboutSection: {
+      enabled: values.aboutSection.enabled === "true",
+      concept: values.aboutSection.concept.trim(),
+      level: values.aboutSection.level.trim(),
+      classes: values.aboutSection.classes.trim(),
+      atmosphere: values.aboutSection.atmosphere.trim(),
+      beginnerWelcome: values.aboutSection.beginnerWelcome.trim(),
+    },
     updatedAt: serverTimestamp(),
   };
 }
@@ -220,6 +264,14 @@ export function getEventFormValues(event: AdminEvent): EventFormValues {
     lateStartAt: toDateTimeInputValue(event.lateStartAt),
     lateEndAt: toDateTimeInputValue(event.lateEndAt),
     status: event.status,
+    aboutSection: {
+      enabled: event.aboutSection.enabled ? "true" : "false",
+      concept: event.aboutSection.concept,
+      level: event.aboutSection.level,
+      classes: event.aboutSection.classes,
+      atmosphere: event.aboutSection.atmosphere,
+      beginnerWelcome: event.aboutSection.beginnerWelcome,
+    },
   };
 }
 

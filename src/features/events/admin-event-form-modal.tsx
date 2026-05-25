@@ -35,11 +35,13 @@ export function AdminEventFormModal({
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useForm<EventFormValues>({
     resolver: zodResolver(eventFormSchema),
     defaultValues: defaultEventFormValues,
   });
+  const isAboutSectionEnabled = watch("aboutSection.enabled") === "true";
 
   useEffect(() => {
     reset(event ? getEventFormValues(event) : defaultEventFormValues);
@@ -76,9 +78,7 @@ export function AdminEventFormModal({
       <div className="max-h-[92vh] w-full overflow-y-auto rounded-lg border border-alma-gold/40 bg-zinc-950 shadow-2xl shadow-black sm:max-w-3xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-white/10 bg-zinc-950/95 px-5 py-4 backdrop-blur">
           <div>
-            <p className="text-xs font-semibold text-alma-gold">
-              大会情報
-            </p>
+            <p className="text-xs font-semibold text-alma-gold">大会情報</p>
             <h2 className="mt-1 text-lg font-bold text-white">
               {event ? "大会を編集" : "大会を追加"}
             </h2>
@@ -145,7 +145,8 @@ export function AdminEventFormModal({
                     画像を選択
                   </span>
                   <span className="mt-2 text-xs leading-5 text-zinc-400">
-                    JPG、PNG、WebPなどの画像ファイルを選択してください。保存時にFirebase Storageへアップロードします。
+                    JPG、PNG、WebPなどの画像ファイルを選択してください。保存時にFirebase
+                    Storageへアップロードします。
                   </span>
                   <input
                     type="file"
@@ -154,7 +155,8 @@ export function AdminEventFormModal({
                     className="mt-4 block w-full text-xs text-zinc-400 file:mr-3 file:rounded-md file:border-0 file:bg-alma-gold file:px-3 file:py-2 file:text-xs file:font-semibold file:text-black"
                   />
                   <span className="mt-3 truncate text-xs text-zinc-500">
-                    {imageFile?.name || (event?.imageUrl ? "現在の画像を使用" : "未選択")}
+                    {imageFile?.name ||
+                      (event?.imageUrl ? "現在の画像を使用" : "未選択")}
                   </span>
                 </label>
               </div>
@@ -168,9 +170,7 @@ export function AdminEventFormModal({
                 className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none transition focus:border-alma-gold"
               />
               {errors.eventDate ? (
-                <span className="text-xs text-red-300">
-                  {errors.eventDate.message}
-                </span>
+                <span className="text-xs text-red-300">{errors.eventDate.message}</span>
               ) : null}
             </label>
 
@@ -231,15 +231,132 @@ export function AdminEventFormModal({
 
             <div className="md:col-span-2 mt-2 border-t border-white/10 pt-5">
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
+                About the Event
+              </p>
+              <h3 className="mt-2 text-lg font-bold text-white">大会紹介</h3>
+              <p className="mt-2 text-xs leading-5 text-zinc-500">
+                公開側の大会詳細ページに表示する「大会紹介」セクションを管理します。
+              </p>
+            </div>
+
+            <fieldset className="space-y-3 md:col-span-2">
+              <legend className="text-sm font-semibold text-zinc-200">
+                大会紹介の表示
+              </legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-center gap-3 rounded-md border border-white/10 bg-black px-4 py-3 text-sm text-zinc-200 transition hover:border-alma-gold/70">
+                  <input
+                    type="radio"
+                    value="true"
+                    {...register("aboutSection.enabled")}
+                    className="h-4 w-4 accent-alma-gold"
+                  />
+                  大会紹介を表示する
+                </label>
+                <label className="flex cursor-pointer items-center gap-3 rounded-md border border-white/10 bg-black px-4 py-3 text-sm text-zinc-200 transition hover:border-alma-gold/70">
+                  <input
+                    type="radio"
+                    value="false"
+                    {...register("aboutSection.enabled")}
+                    className="h-4 w-4 accent-alma-gold"
+                  />
+                  大会紹介を表示しない
+                </label>
+              </div>
+              {errors.aboutSection?.enabled ? (
+                <span className="text-xs text-red-300">
+                  {errors.aboutSection.enabled.message}
+                </span>
+              ) : null}
+            </fieldset>
+
+            {isAboutSectionEnabled ? (
+              <div className="grid gap-4 rounded-lg border border-alma-gold/20 bg-alma-gold/[0.04] p-4 md:col-span-2 md:grid-cols-2">
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-semibold text-zinc-200">
+                    大会コンセプト
+                  </span>
+                  <textarea
+                    {...register("aboutSection.concept")}
+                    rows={3}
+                    className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                  />
+                  {errors.aboutSection?.concept ? (
+                    <span className="text-xs text-red-300">
+                      {errors.aboutSection.concept.message}
+                    </span>
+                  ) : null}
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-zinc-200">レベル</span>
+                  <textarea
+                    {...register("aboutSection.level")}
+                    rows={3}
+                    className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                  />
+                  {errors.aboutSection?.level ? (
+                    <span className="text-xs text-red-300">
+                      {errors.aboutSection.level.message}
+                    </span>
+                  ) : null}
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-zinc-200">クラス</span>
+                  <textarea
+                    {...register("aboutSection.classes")}
+                    rows={3}
+                    className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                  />
+                  {errors.aboutSection?.classes ? (
+                    <span className="text-xs text-red-300">
+                      {errors.aboutSection.classes.message}
+                    </span>
+                  ) : null}
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-zinc-200">雰囲気</span>
+                  <textarea
+                    {...register("aboutSection.atmosphere")}
+                    rows={3}
+                    className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                  />
+                  {errors.aboutSection?.atmosphere ? (
+                    <span className="text-xs text-red-300">
+                      {errors.aboutSection.atmosphere.message}
+                    </span>
+                  ) : null}
+                </label>
+
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-zinc-200">
+                    初参加歓迎
+                  </span>
+                  <textarea
+                    {...register("aboutSection.beginnerWelcome")}
+                    rows={3}
+                    className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                  />
+                  {errors.aboutSection?.beginnerWelcome ? (
+                    <span className="text-xs text-red-300">
+                      {errors.aboutSection.beginnerWelcome.message}
+                    </span>
+                  ) : null}
+                </label>
+              </div>
+            ) : null}
+
+            <div className="md:col-span-2 mt-2 border-t border-white/10 pt-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
                 Price Settings
               </p>
               <h3 className="mt-2 text-lg font-bold text-white">エントリー価格</h3>
             </div>
 
             <label className="space-y-2">
-              <span className="text-sm font-semibold text-zinc-200">
-                早期割引価格
-              </span>
+              <span className="text-sm font-semibold text-zinc-200">早期割引価格</span>
               <input
                 type="number"
                 min={1}
@@ -255,9 +372,7 @@ export function AdminEventFormModal({
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-semibold text-zinc-200">
-                早期割引開始
-              </span>
+              <span className="text-sm font-semibold text-zinc-200">早期割引開始</span>
               <input
                 type="datetime-local"
                 {...register("earlyBirdStartAt")}
@@ -271,9 +386,7 @@ export function AdminEventFormModal({
             </label>
 
             <label className="space-y-2">
-              <span className="text-sm font-semibold text-zinc-200">
-                早期割引終了
-              </span>
+              <span className="text-sm font-semibold text-zinc-200">早期割引終了</span>
               <input
                 type="datetime-local"
                 {...register("earlyBirdEndAt")}
@@ -340,9 +453,7 @@ export function AdminEventFormModal({
                 className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none transition focus:border-alma-gold"
               />
               {errors.latePrice ? (
-                <span className="text-xs text-red-300">
-                  {errors.latePrice.message}
-                </span>
+                <span className="text-xs text-red-300">{errors.latePrice.message}</span>
               ) : null}
             </label>
 
@@ -368,15 +479,18 @@ export function AdminEventFormModal({
                 className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none transition focus:border-alma-gold"
               />
               {errors.lateEndAt ? (
-                <span className="text-xs text-red-300">
-                  {errors.lateEndAt.message}
-                </span>
+                <span className="text-xs text-red-300">{errors.lateEndAt.message}</span>
               ) : null}
             </label>
           </div>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button type="button" variant="secondary" onClick={onClose} disabled={isSaving}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onClose}
+              disabled={isSaving}
+            >
               キャンセル
             </Button>
             <Button type="submit" disabled={isSaving}>

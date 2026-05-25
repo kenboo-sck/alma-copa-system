@@ -69,6 +69,10 @@ function EarlyEntryPolicyCard() {
   );
 }
 
+function getAboutText(value: string, fallback: string) {
+  return value.trim() || fallback;
+}
+
 function formatPrice(value: number) {
   if (!value || value <= 0) {
     return "未設定";
@@ -176,6 +180,44 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
       price: event.latePrice,
       startAt: event.lateStartAt,
       endAt: event.lateEndAt,
+    },
+  ];
+  const aboutItems = [
+    {
+      label: "大会コンセプト",
+      value: getAboutText(
+        event.aboutSection.concept,
+        event.description || "緊張感とリスペクトを大切にしたブラジリアン柔術大会です。",
+      ),
+    },
+    {
+      label: "レベル",
+      value: getAboutText(
+        event.aboutSection.level,
+        "初参加から競技経験者まで、幅広い選手に対応します。",
+      ),
+    },
+    {
+      label: "クラス",
+      value: getAboutText(
+        event.aboutSection.classes,
+        "個人戦 / 代表者エントリーなど、大会要項に沿って受付します。",
+      ),
+    },
+    {
+      label: "雰囲気",
+      value: getAboutText(
+        event.aboutSection.atmosphere,
+        "黒とゴールドを基調にした、静かで緊張感のある大会体験を目指しています。",
+      ),
+    },
+    {
+      label: "初参加歓迎",
+      value: getAboutText(
+        event.aboutSection.beginnerWelcome,
+        "ルールや受付導線をわかりやすく整理し、初めての方でも申し込みしやすい構成にしています。",
+      ),
+      wide: true,
     },
   ];
 
@@ -328,58 +370,29 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
               </div>
             </div>
 
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.34em] text-alma-gold/90">
-                About the Event
-              </p>
-              <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">
-                大会紹介
-              </h2>
+            {event.aboutSection.enabled ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.34em] text-alma-gold/90">
+                  About the Event
+                </p>
+                <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">
+                  大会紹介
+                </h2>
 
-              <div className="mt-6 grid gap-5 border-y border-white/10 py-6 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                    大会コンセプト
-                  </p>
-                  <p className="mt-2 text-base leading-7 text-zinc-300">
-                    {event.description ||
-                      "緊張感とリスペクトを大切にしたブラジリアン柔術大会です。"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                    レベル
-                  </p>
-                  <p className="mt-2 text-base leading-7 text-zinc-300">
-                    初参加から競技経験者まで、幅広い選手に対応します。
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                    クラス
-                  </p>
-                  <p className="mt-2 text-base leading-7 text-zinc-300">
-                    個人戦 / 代表者エントリーなど、大会要項に沿って受付します。
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                    雰囲気
-                  </p>
-                  <p className="mt-2 text-base leading-7 text-zinc-300">
-                    黒とゴールドを基調にした、静かで緊張感のある大会体験を目指しています。
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                    初参加歓迎
-                  </p>
-                  <p className="mt-2 text-base leading-7 text-zinc-300">
-                    ルールや受付導線をわかりやすく整理し、初めての方でも申し込みしやすい構成にしています。
-                  </p>
+                <div className="mt-6 grid gap-5 border-y border-white/10 py-6 sm:grid-cols-2">
+                  {aboutItems.map((item) => (
+                    <div key={item.label} className={item.wide ? "sm:col-span-2" : ""}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
+                        {item.label}
+                      </p>
+                      <p className="mt-2 whitespace-pre-line text-base leading-7 text-zinc-300">
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
+            ) : null}
           </div>
 
           <aside className="lg:sticky lg:top-24">
