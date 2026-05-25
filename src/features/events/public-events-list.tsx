@@ -124,20 +124,20 @@ export function PublicEventsList() {
               return (
                 <article
                   key={event.id}
-                  className="overflow-hidden rounded-3xl border border-white/10 bg-[rgba(255,255,255,0.03)] shadow-2xl shadow-black/30 transition hover:border-alma-gold/30"
+                  className="group overflow-hidden rounded-3xl border border-white/10 bg-[rgba(255,255,255,0.03)] shadow-2xl shadow-black/30 transition hover:border-alma-gold/30"
                 >
                   <div className="grid gap-0 lg:grid-cols-[240px_1fr]">
-                    <div
-                      className="relative min-h-48 overflow-hidden border-b border-white/10 lg:border-b-0 lg:border-r"
-                      style={{
-                        backgroundImage: `linear-gradient(180deg,rgba(0,0,0,0.14),rgba(0,0,0,0.84)),linear-gradient(135deg,rgba(9,9,9,0.28) 0%,rgba(23,23,23,0.2) 100%),url('${toCssUrl(eventImage)}')`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                      }}
-                    >
-                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(214,173,69,0.12),transparent_28%),radial-gradient(circle_at_82%_82%,rgba(214,173,69,0.08),transparent_24%),linear-gradient(180deg,rgba(0,0,0,0.32),rgba(0,0,0,0.68))]" />
+                    <div className="relative min-h-48 overflow-hidden border-b border-white/10 bg-black lg:border-b-0 lg:border-r">
+                      <div
+                        className="absolute inset-0 bg-cover bg-center opacity-95 brightness-[1.12] contrast-[0.96] saturate-[1.03] transition duration-300 group-hover:brightness-[1.18] group-hover:contrast-[0.98]"
+                        style={{
+                          backgroundImage: `url('${toCssUrl(eventImage)}')`,
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(214,173,69,0.1),transparent_30%),radial-gradient(circle_at_82%_82%,rgba(214,173,69,0.06),transparent_26%),linear-gradient(180deg,rgba(0,0,0,0.1),rgba(0,0,0,0.38))]" />
                       <div className="absolute inset-0 bg-[linear-gradient(115deg,transparent_0,rgba(255,255,255,0.045)_50%,transparent_56%)] opacity-20" />
-                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_38%,rgba(0,0,0,0.22)_72%,rgba(0,0,0,0.42)_100%)]" />
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_46%,rgba(0,0,0,0.14)_72%,rgba(0,0,0,0.3)_100%)]" />
+                      <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
                       <div className="absolute inset-0 flex items-end p-5">
                         <div className="max-w-[11rem]">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-alma-gold/95 drop-shadow-[0_2px_8px_rgba(0,0,0,0.45)]">
