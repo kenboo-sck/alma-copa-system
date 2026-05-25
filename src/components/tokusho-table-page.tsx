@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { LegalPageHero } from "@/components/legal-page-hero";
+
 type TokushoRow = {
   label: string;
   content: ReactNode;
@@ -147,21 +149,12 @@ const tokushoRows: TokushoRow[] = [
 export function TokushoTablePage() {
   return (
     <main className="bg-[#050505] text-white">
-      <section className="relative overflow-hidden border-b border-white/10 bg-[radial-gradient(circle_at_16%_0%,rgba(214,173,69,0.12),transparent_34%),linear-gradient(180deg,#070707_0%,#050505_100%)]">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_92%_22%,rgba(255,255,255,0.055),transparent_26%)]" />
-        <div className="relative mx-auto w-full max-w-[1280px] px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
-          <p className="text-xs font-semibold uppercase tracking-[0.34em] text-alma-gold/90">
-            LEGAL NOTICE
-          </p>
-          <h1 className="mt-3 text-3xl font-black text-white sm:text-4xl">
-            特定商取引法に基づく表記
-          </h1>
-          <p className="mt-4 max-w-4xl text-sm leading-7 text-zinc-400 sm:text-base">
-            ALMA COPA
-            の大会エントリー受付に関する販売条件、支払方法、キャンセル・返金規定等を記載しています。
-          </p>
-        </div>
-      </section>
+      <LegalPageHero
+        title="LEGAL"
+        highlightedTitle="NOTICE"
+        subtitle="特定商取引法に基づく表記"
+        maxWidth="max-w-[1280px]"
+      />
 
       <section>
         <div className="mx-auto w-full max-w-[1280px] px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
