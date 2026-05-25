@@ -3,9 +3,9 @@ import { AdminPlaceholderPage } from "@/components/admin/admin-placeholder-page"
 export default function AdminWeighInPage() {
   return (
     <AdminPlaceholderPage
-      title="計量"
-      description="計量結果、失格、カテゴリ変更が必要な参加者を管理します。"
-      placeholder="計量入力と確認リストをここに表示します。"
+      title="準備中"
+      description="この機能は現在使用していません。エントリー確認、決済確認、受付管理をご利用ください。"
+      placeholder="必要になったタイミングで再度有効化します。"
     />
   );
 }

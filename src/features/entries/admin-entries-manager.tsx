@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
-import type { EntryType, ReceptionStatus, WeighInStatus } from "@/types/entry";
+import type { EntryType, ReceptionStatus } from "@/types/entry";
 
 type PaymentStatus = "pending" | "paid" | "failed";
 type PaymentStatusFilter = "all" | PaymentStatus;
@@ -35,11 +35,7 @@ type AdminEntry = {
   stripeSessionId: string;
   stripePaymentIntentId: string;
   receptionStatus: ReceptionStatus;
-  weighInStatus: WeighInStatus;
-  bibNumber: string;
-  bracketPosition: string;
   checkedInAt: Date | null;
-  weighInAt: Date | null;
   createdAt: Date | null;
   updatedAt: Date | null;
 };
@@ -66,11 +62,6 @@ const receptionStatusLabels: Record<ReceptionStatus, string> = {
   checked_in: "受付済",
 };
 
-const weighInStatusLabels: Record<WeighInStatus, string> = {
-  not_weighed: "未計量",
-  weighed: "計量済",
-};
-
 function toDate(value: unknown): Date | null {
   if (value instanceof Timestamp) {
     return value.toDate();
@@ -93,10 +84,6 @@ function toEntryType(value: unknown): EntryType {
 
 function toReceptionStatus(value: unknown): ReceptionStatus {
   return value === "checked_in" ? "checked_in" : "not_checked_in";
-}
-
-function toWeighInStatus(value: unknown): WeighInStatus {
-  return value === "weighed" ? "weighed" : "not_weighed";
 }
 
 function formatDate(value: Date | null) {
@@ -138,7 +125,7 @@ type AdminEntriesManagerProps = {
 export function AdminEntriesManager({
   eyebrow = "エントリー管理",
   title = "エントリー",
-  description = "申込者情報、決済状態、受付、計量、ゼッケンを管理します。",
+  description = "申込者情報、決済状態、受付状態を確認・管理します。",
 }: AdminEntriesManagerProps = {}) {
   const [entries, setEntries] = useState<AdminEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -183,12 +170,7 @@ export function AdminEntriesManager({
                   ? data.stripePaymentIntentId
                   : "",
               receptionStatus: toReceptionStatus(data.receptionStatus),
-              weighInStatus: toWeighInStatus(data.weighInStatus),
-              bibNumber: typeof data.bibNumber === "string" ? data.bibNumber : "",
-              bracketPosition:
-                typeof data.bracketPosition === "string" ? data.bracketPosition : "",
               checkedInAt: toDate(data.checkedInAt),
-              weighInAt: toDate(data.weighInAt),
               createdAt: toDate(data.createdAt),
               updatedAt: toDate(data.updatedAt),
             };
@@ -249,7 +231,6 @@ export function AdminEntriesManager({
           entry.phone,
           entry.category,
           entry.gym,
-          entry.bibNumber,
         ]
           .join(" ")
           .toLowerCase()
@@ -291,11 +272,7 @@ export function AdminEntriesManager({
       "カテゴリ",
       "決済状態",
       "受付状態",
-      "計量状態",
-      "ゼッケン",
-      "トーナメント位置",
       "受付日時",
-      "計量日時",
     ];
     const rows = visibleEntries.map((entry) => [
       entry.id,
@@ -310,11 +287,7 @@ export function AdminEntriesManager({
       entry.category,
       paymentStatusLabels[entry.paymentStatus],
       receptionStatusLabels[entry.receptionStatus],
-      weighInStatusLabels[entry.weighInStatus],
-      entry.bibNumber,
-      entry.bracketPosition,
       formatDateTime(entry.checkedInAt),
-      formatDateTime(entry.weighInAt),
     ]);
     const csv = [headers, ...rows]
       .map((row) => row.map((value) => csvCell(String(value))).join(","))
@@ -337,15 +310,6 @@ export function AdminEntriesManager({
     return updateEntry(entry.id, {
       receptionStatus: checkedIn ? "checked_in" : "not_checked_in",
       checkedInAt: checkedIn ? serverTimestamp() : null,
-    });
-  }
-
-  function toggleWeighIn(entry: AdminEntry) {
-    const weighed = entry.weighInStatus !== "weighed";
-
-    return updateEntry(entry.id, {
-      weighInStatus: weighed ? "weighed" : "not_weighed",
-      weighInAt: weighed ? serverTimestamp() : null,
     });
   }
 
@@ -406,7 +370,7 @@ export function AdminEntriesManager({
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="氏名、メール、ゼッケン、QRのIDで検索"
+              placeholder="氏名、メール、QRのIDで検索"
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             />
           </label>
@@ -478,19 +442,9 @@ export function AdminEntriesManager({
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-zinc-500">ゼッケン</dt>
-                    <dd className="mt-1 text-zinc-200">{entry.bibNumber || "-"}</dd>
-                  </div>
-                  <div>
                     <dt className="text-xs text-zinc-500">受付</dt>
                     <dd className="mt-1 text-zinc-200">
                       {receptionStatusLabels[entry.receptionStatus]}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-zinc-500">計量</dt>
-                    <dd className="mt-1 text-zinc-200">
-                      {weighInStatusLabels[entry.weighInStatus]}
                     </dd>
                   </div>
                 </dl>
@@ -501,13 +455,6 @@ export function AdminEntriesManager({
                     className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
                   >
                     受付済切替
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void toggleWeighIn(entry)}
-                    className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
-                  >
-                    計量済切替
                   </button>
                   <button
                     type="button"
@@ -530,7 +477,7 @@ export function AdminEntriesManager({
 
           <div className="hidden overflow-hidden rounded-lg border border-white/10 bg-white/[0.03] xl:block">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1360px] text-left text-sm">
+              <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead className="border-b border-white/10 bg-black/50 text-xs text-zinc-400">
                   <tr>
                     <th className="px-4 py-3 font-semibold">氏名</th>
@@ -538,8 +485,7 @@ export function AdminEntriesManager({
                     <th className="px-4 py-3 font-semibold">種別</th>
                     <th className="px-4 py-3 font-semibold">カテゴリ</th>
                     <th className="px-4 py-3 font-semibold">決済</th>
-                    <th className="px-4 py-3 font-semibold">受付/計量</th>
-                    <th className="px-4 py-3 font-semibold">ゼッケン</th>
+                    <th className="px-4 py-3 font-semibold">受付</th>
                     <th className="px-4 py-3 font-semibold">作成日時</th>
                     <th className="px-4 py-3 font-semibold">操作</th>
                   </tr>
@@ -565,34 +511,6 @@ export function AdminEntriesManager({
                       </td>
                       <td className="px-4 py-4 text-zinc-300">
                         <p>{receptionStatusLabels[entry.receptionStatus]}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {weighInStatusLabels[entry.weighInStatus]}
-                        </p>
-                      </td>
-                      <td className="px-4 py-4">
-                        <input
-                          defaultValue={entry.bibNumber}
-                          onBlur={(event) => {
-                            if (event.target.value !== entry.bibNumber) {
-                              void updateEntry(entry.id, {
-                                bibNumber: event.target.value.trim(),
-                              });
-                            }
-                          }}
-                          className="h-9 w-24 rounded-md border border-white/10 bg-black px-2 text-sm text-white outline-none focus:border-alma-gold"
-                        />
-                        <input
-                          defaultValue={entry.bracketPosition}
-                          placeholder="配置"
-                          onBlur={(event) => {
-                            if (event.target.value !== entry.bracketPosition) {
-                              void updateEntry(entry.id, {
-                                bracketPosition: event.target.value.trim(),
-                              });
-                            }
-                          }}
-                          className="mt-2 h-9 w-24 rounded-md border border-white/10 bg-black px-2 text-sm text-white outline-none focus:border-alma-gold"
-                        />
                       </td>
                       <td className="px-4 py-4 text-zinc-300">
                         {formatDateTime(entry.createdAt)}
@@ -605,13 +523,6 @@ export function AdminEntriesManager({
                             className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
                           >
                             受付
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void toggleWeighIn(entry)}
-                            className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
-                          >
-                            計量
                           </button>
                           <button
                             type="button"

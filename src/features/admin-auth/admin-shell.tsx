@@ -13,7 +13,6 @@ const navItems = [
   { label: "選手管理", href: "/admin/participants" },
   { label: "決済", href: "/admin/payments" },
   { label: "受付", href: "/admin/reception" },
-  { label: "計量", href: "/admin/weigh-in" },
   { label: "メール履歴", href: "/admin/email-logs" },
   { label: "設定", href: "/admin/settings" },
 ];

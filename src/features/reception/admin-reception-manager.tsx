@@ -19,7 +19,6 @@ type ReceptionEntry = {
   eventTitle: string;
   name: string;
   kana: string;
-  bibNumber: string;
   category: string;
   receptionStatus: "not_checked_in" | "checked_in";
   checkedInAt: Date | null;
@@ -71,12 +70,9 @@ export function AdminReceptionManager() {
                 typeof data.eventTitle === "string" ? data.eventTitle : "大会未設定",
               name: typeof data.name === "string" ? data.name : "",
               kana: typeof data.kana === "string" ? data.kana : "",
-              bibNumber: typeof data.bibNumber === "string" ? data.bibNumber : "",
               category: typeof data.category === "string" ? data.category : "",
               receptionStatus:
-                data.receptionStatus === "checked_in"
-                  ? "checked_in"
-                  : "not_checked_in",
+                data.receptionStatus === "checked_in" ? "checked_in" : "not_checked_in",
               checkedInAt: toDate(data.checkedInAt),
             };
           }),
@@ -102,7 +98,7 @@ export function AdminReceptionManager() {
     }
 
     return entries.filter((entry) =>
-      [entry.id, entry.name, entry.kana, entry.bibNumber, entry.category]
+      [entry.id, entry.name, entry.kana, entry.category]
         .join(" ")
         .toLowerCase()
         .includes(query),
@@ -114,8 +110,7 @@ export function AdminReceptionManager() {
       await updateDoc(doc(db, collections.entries, entry.id), {
         receptionStatus:
           entry.receptionStatus === "checked_in" ? "not_checked_in" : "checked_in",
-        checkedInAt:
-          entry.receptionStatus === "checked_in" ? null : serverTimestamp(),
+        checkedInAt: entry.receptionStatus === "checked_in" ? null : serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
     } catch (caughtError) {
@@ -130,7 +125,7 @@ export function AdminReceptionManager() {
         <p className="text-sm font-semibold text-alma-gold">当日運営</p>
         <h1 className="mt-2 text-2xl font-bold text-white">受付</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
-          QRコードのentryId、氏名、ゼッケンで検索して受付状態を更新します。
+          QRコードのentryId、氏名で検索して受付状態を更新します。
         </p>
       </div>
 
@@ -143,7 +138,7 @@ export function AdminReceptionManager() {
       <input
         value={searchQuery}
         onChange={(event) => setSearchQuery(event.target.value)}
-        placeholder="QRのentryId、氏名、ゼッケンで検索"
+        placeholder="QRのentryId、氏名で検索"
         className="h-12 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
       />
 
@@ -177,9 +172,7 @@ export function AdminReceptionManager() {
                   <p className="mt-1 text-sm text-zinc-400">
                     {entry.eventTitle} / {entry.category}
                   </p>
-                  <p className="mt-1 font-mono text-xs text-zinc-500">
-                    {entry.id} / ゼッケン {entry.bibNumber || "-"}
-                  </p>
+                  <p className="mt-1 font-mono text-xs text-zinc-500">{entry.id}</p>
                 </div>
                 <button
                   type="button"

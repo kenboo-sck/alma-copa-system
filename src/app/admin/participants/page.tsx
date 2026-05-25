@@ -5,7 +5,7 @@ export default function AdminParticipantsPage() {
     <AdminEntriesManager
       eyebrow="選手管理"
       title="選手一覧"
-      description="大会に登録された選手情報、決済状態、受付、計量、ゼッケンを管理します。"
+      description="大会に登録された選手情報、決済状態、受付状態を確認・管理します。"
     />
   );
 }
