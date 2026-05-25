@@ -1,10 +1,5 @@
-import {
-  Timestamp,
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore/lite";
+import { doc, getDoc } from "firebase/firestore/lite";
+import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 
 import {
@@ -236,6 +231,64 @@ function logDuplicateDiagnostic({
   });
 }
 
+function getErrorDetails(error: unknown) {
+  if (error && typeof error === "object") {
+    const maybeError = error as {
+      code?: unknown;
+      name?: unknown;
+      message?: unknown;
+      stack?: unknown;
+    };
+
+    return {
+      code: typeof maybeError.code === "string" ? maybeError.code : undefined,
+      name: typeof maybeError.name === "string" ? maybeError.name : undefined,
+      message:
+        typeof maybeError.message === "string" ? maybeError.message : String(error),
+      stack: typeof maybeError.stack === "string" ? maybeError.stack : undefined,
+    };
+  }
+
+  return {
+    code: undefined,
+    name: undefined,
+    message: String(error),
+    stack: undefined,
+  };
+}
+
+function findUnsupportedPayloadPaths(value: unknown, path = "payload"): string[] {
+  if (value === undefined) {
+    return [path];
+  }
+
+  if (typeof value === "number" && Number.isNaN(value)) {
+    return [path];
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? [path] : [];
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  if (value instanceof FieldValue) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      findUnsupportedPayloadPaths(item, `${path}[${index}]`),
+    );
+  }
+
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) =>
+    findUnsupportedPayloadPaths(item, `${path}.${key}`),
+  );
+}
+
 async function inspectEntryDocument(entryId: string) {
   const missingAdminEnv = getMissingAdminFirestoreEnvNames();
 
@@ -273,26 +326,6 @@ async function inspectEntryDocument(entryId: string) {
     isConfirmed: isConfirmedEntry(data),
     ref: entrySnapshot.ref,
   };
-}
-
-async function clearStaleEntryReservation(entryId: string) {
-  const inspection = await inspectEntryDocument(entryId);
-
-  if (!inspection.ok) {
-    return inspection;
-  }
-
-  if (!inspection.exists) {
-    return { ok: false, reason: "entry_not_found" as const, inspection };
-  }
-
-  if (inspection.isConfirmed) {
-    return { ok: false, reason: "confirmed_entry_exists" as const, inspection };
-  }
-
-  await inspection.ref.delete();
-
-  return { ok: true, reason: "stale_entry_deleted" as const, inspection };
 }
 
 function buildServerConfigFailure() {
@@ -555,7 +588,6 @@ export async function POST(request: Request) {
       });
     }
 
-    const entryRef = doc(db, collections.entries, resolvedEntryId);
     const entryPayload = {
       eventId: parsed.data.eventId,
       eventTitle: parsed.data.eventTitle,
@@ -569,7 +601,7 @@ export async function POST(request: Request) {
       normalizedEmail,
       phone: parsed.data.phone,
       gender: parsed.data.gender,
-      birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
+      birthDate: new Date(parsed.data.birthDate),
       gym:
         parsed.data.entryType === "representative" && parsed.data.representative
           ? parsed.data.representative.gym
@@ -600,7 +632,7 @@ export async function POST(request: Request) {
               name: parsed.data.name,
               kana: parsed.data.kana,
               gender: parsed.data.gender,
-              birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
+              birthDate: new Date(parsed.data.birthDate),
               category: parsed.data.category,
               ageCategory: parsed.data.ageCategory,
               weightClass: parsed.data.weightClass,
@@ -629,93 +661,117 @@ export async function POST(request: Request) {
       stripePaymentIntentId: "",
       paymentFailedAt: null,
       paidAt: null,
-      updatedAt: serverTimestamp(),
-      createdAt: serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     };
 
-    try {
-      await setDoc(entryRef, entryPayload);
-    } catch (writeError) {
-      const staleReservationResult = await clearStaleEntryReservation(
-        resolvedEntryId,
-      ).catch((cleanupError) => ({
-        ok: false,
-        reason: "cleanup_failed" as const,
-        cleanupError:
-          cleanupError instanceof Error
-            ? {
-                name: cleanupError.name,
-                message: cleanupError.message,
-              }
-            : cleanupError,
-      }));
+    const unsupportedPayloadPaths = findUnsupportedPayloadPaths(entryPayload);
+    if (unsupportedPayloadPaths.length > 0) {
+      const failure = buildFailure(
+        500,
+        "unexpected_error",
+        "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+        [
+          {
+            field: "form",
+            message:
+              "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+            code: "entry_payload_invalid",
+          },
+        ],
+      );
 
-      if (staleReservationResult.ok) {
-        const inspection =
-          "inspection" in staleReservationResult
-            ? staleReservationResult.inspection
-            : null;
-        logDuplicateDiagnostic({
-          eventId: parsed.data.eventId,
-          normalizedEmail,
-          entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-          exists: inspection?.exists ?? null,
-          paymentStatus: inspection?.paymentStatus ?? null,
-          entryStatus: inspection?.entryStatus ?? null,
-          reason: staleReservationResult.reason ?? "unknown",
-          writeError,
-        });
-        await setDoc(entryRef, entryPayload);
-      } else {
-        const inspection =
-          "inspection" in staleReservationResult
-            ? staleReservationResult.inspection
-            : null;
-        const exists =
-          inspection && "exists" in inspection ? (inspection.exists ?? null) : null;
-        const paymentStatus =
-          inspection && "paymentStatus" in inspection ? inspection.paymentStatus : null;
-        const entryStatus =
-          inspection && "entryStatus" in inspection ? inspection.entryStatus : null;
+      console.error("Stripe Checkout entry payload contains unsupported values", {
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        eventId: parsed.data.eventId,
+        normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+        unsupportedPayloadPaths,
+        validationResult: failure,
+        formData: rawInput,
+      });
 
-        logDuplicateDiagnostic({
-          eventId: parsed.data.eventId,
-          normalizedEmail,
-          entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-          exists,
-          paymentStatus,
-          entryStatus,
-          reason: staleReservationResult.reason ?? "unknown",
-          writeError,
-        });
+      return Response.json(failure, { status: failure.status });
+    }
 
-        if (staleReservationResult.reason !== "confirmed_entry_exists") {
-          const failure = buildFailure(
-            500,
-            "unexpected_error",
-            "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
-            [
-              {
-                field: "form",
-                message:
-                  "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
-                code: "entry_create_failed",
-              },
-            ],
-          );
+    const inspection = await inspectEntryDocument(resolvedEntryId);
 
-          console.error("Stripe Checkout entry create failed before duplicate", {
-            entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-            eventId: parsed.data.eventId,
-            normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
-            reason: staleReservationResult.reason,
-            validationResult: failure,
-            formData: rawInput,
-          });
+    if (!inspection.ok) {
+      const failure = buildFailure(
+        500,
+        "unexpected_error",
+        "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+        [
+          {
+            field: "form",
+            message:
+              "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+            code: "entry_admin_firestore_unavailable",
+          },
+        ],
+      );
 
-          return Response.json(failure, { status: failure.status });
-        }
+      logDuplicateDiagnostic({
+        eventId: parsed.data.eventId,
+        normalizedEmail,
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        exists: null,
+        paymentStatus: null,
+        entryStatus: null,
+        reason: inspection.reason ?? "unknown",
+      });
+      console.error("Stripe Checkout entry create admin setup failed", {
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        eventId: parsed.data.eventId,
+        normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+        inspection,
+        validationResult: failure,
+        formData: rawInput,
+      });
 
+      return Response.json(failure, { status: failure.status });
+    }
+
+    if (!("ref" in inspection) || !inspection.ref) {
+      const failure = buildFailure(
+        500,
+        "unexpected_error",
+        "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+        [
+          {
+            field: "form",
+            message:
+              "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+            code: "entry_admin_ref_missing",
+          },
+        ],
+      );
+
+      console.error("Stripe Checkout entry document reference missing", {
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        eventId: parsed.data.eventId,
+        normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+        inspection,
+        validationResult: failure,
+        formData: rawInput,
+      });
+
+      return Response.json(failure, { status: failure.status });
+    }
+
+    if (inspection.exists) {
+      logDuplicateDiagnostic({
+        eventId: parsed.data.eventId,
+        normalizedEmail,
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        exists: inspection.exists,
+        paymentStatus: inspection.paymentStatus,
+        entryStatus: inspection.entryStatus,
+        reason: inspection.isConfirmed
+          ? "confirmed_entry_exists"
+          : "stale_entry_will_be_overwritten",
+      });
+
+      if (inspection.isConfirmed) {
         const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
         const failure = buildFailure(
           409,
@@ -724,29 +780,62 @@ export async function POST(request: Request) {
           [duplicateError],
         );
 
-        console.error("Stripe Checkout entry create failed", {
+        console.error("Stripe Checkout duplicate entry blocked", {
           entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
           eventId: parsed.data.eventId,
           normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
           duplicateCheck: {
-            exists,
-            paymentStatus,
-            entryStatus,
-            reason: staleReservationResult.reason,
+            exists: inspection.exists,
+            paymentStatus: inspection.paymentStatus,
+            entryStatus: inspection.entryStatus,
+            reason: "confirmed_entry_exists",
           },
           validationResult: failure,
           formData: rawInput,
-          error:
-            writeError instanceof Error
-              ? {
-                  name: writeError.name,
-                  message: writeError.message,
-                }
-              : writeError,
         });
 
         return Response.json(failure, { status: failure.status });
       }
+    }
+
+    try {
+      await inspection.ref.set(entryPayload);
+    } catch (writeError) {
+      const failure = buildFailure(
+        500,
+        "unexpected_error",
+        "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+        [
+          {
+            field: "form",
+            message:
+              "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+            code: "entry_create_failed",
+          },
+        ],
+      );
+
+      logDuplicateDiagnostic({
+        eventId: parsed.data.eventId,
+        normalizedEmail,
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        exists: inspection.exists,
+        paymentStatus: inspection.paymentStatus,
+        entryStatus: inspection.entryStatus,
+        reason: "admin_entry_set_failed",
+        writeError,
+      });
+      console.error("Stripe Checkout entry create failed", {
+        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+        eventId: parsed.data.eventId,
+        normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+        firestorePath: `${collections.entries}/${getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail)}`,
+        error: getErrorDetails(writeError),
+        validationResult: failure,
+        formData: rawInput,
+      });
+
+      return Response.json(failure, { status: failure.status });
     }
 
     const successUrl =
