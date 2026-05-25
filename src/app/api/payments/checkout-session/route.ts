@@ -1,5 +1,9 @@
-import { doc, getDoc } from "firebase/firestore/lite";
-import { FieldValue } from "firebase-admin/firestore";
+import {
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore/lite";
 import { z } from "zod";
 
 import {
@@ -18,10 +22,6 @@ import {
   getMissingPublicFirestoreEnvNames,
   getPublicFirestore,
 } from "@/lib/firebase/public-firestore";
-import {
-  getAdminFirestore,
-  getMissingAdminFirestoreEnvNames,
-} from "@/lib/firebase/admin";
 import { getSiteUrl } from "@/lib/site-url";
 import { paymentService } from "@/lib/payments";
 import {
@@ -167,7 +167,7 @@ function logSchemaFailure(
 }
 
 function isConfirmedEntry(data: Record<string, unknown>) {
-  return data.entryStatus === "confirmed" || data.paymentStatus === "paid";
+  return data.entryStatus === "confirmed" && data.paymentStatus === "paid";
 }
 
 function getSafeDuplicateDiagnosticValue(value: string) {
@@ -274,10 +274,6 @@ function findUnsupportedPayloadPaths(value: unknown, path = "payload"): string[]
     return [];
   }
 
-  if (value instanceof FieldValue) {
-    return [];
-  }
-
   if (Array.isArray(value)) {
     return value.flatMap((item, index) =>
       findUnsupportedPayloadPaths(item, `${path}[${index}]`),
@@ -290,42 +286,42 @@ function findUnsupportedPayloadPaths(value: unknown, path = "payload"): string[]
 }
 
 async function inspectEntryDocument(entryId: string) {
-  const missingAdminEnv = getMissingAdminFirestoreEnvNames();
+  const db = getPublicFirestore();
+  const entryRef = doc(db, collections.entries, entryId);
+  const entrySnapshot = await getDoc(entryRef);
 
-  if (missingAdminEnv.length > 0) {
+  if (!entrySnapshot.exists()) {
     return {
-      ok: false,
-      reason: "admin_config_missing" as const,
-      missingAdminEnv,
-    };
-  }
-
-  const adminDb = getAdminFirestore();
-  const entrySnapshot = await adminDb
-    .collection(collections.entries)
-    .doc(entryId)
-    .get();
-
-  if (!entrySnapshot.exists) {
-    return {
-      ok: true,
+      ok: true as const,
       exists: false,
       paymentStatus: null,
       entryStatus: null,
-      ref: entrySnapshot.ref,
+      ref: entryRef,
     };
   }
 
-  const data = entrySnapshot.data() ?? {};
+  const data = (entrySnapshot.data() as Record<string, unknown>) ?? {};
 
   return {
-    ok: true,
+    ok: true as const,
     exists: true,
     paymentStatus: data.paymentStatus ?? null,
     entryStatus: data.entryStatus ?? null,
     isConfirmed: isConfirmedEntry(data),
-    ref: entrySnapshot.ref,
+    ref: entryRef,
   };
+}
+
+async function inspectConfirmedEntryAfterWriteFailure(entryId: string) {
+  try {
+    return await inspectEntryDocument(entryId);
+  } catch (error) {
+    return {
+      ok: false as const,
+      reason: "duplicate_inspection_failed" as const,
+      error,
+    };
+  }
 }
 
 function buildServerConfigFailure() {
@@ -661,8 +657,8 @@ export async function POST(request: Request) {
       stripePaymentIntentId: "",
       paymentFailedAt: null,
       paidAt: null,
-      updatedAt: FieldValue.serverTimestamp(),
-      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
     };
 
     const unsupportedPayloadPaths = findUnsupportedPayloadPaths(entryPayload);
@@ -693,85 +689,19 @@ export async function POST(request: Request) {
       return Response.json(failure, { status: failure.status });
     }
 
-    const inspection = await inspectEntryDocument(resolvedEntryId);
+    const entryRef = doc(db, collections.entries, resolvedEntryId);
 
-    if (!inspection.ok) {
-      const failure = buildFailure(
-        500,
-        "unexpected_error",
-        "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
-        [
-          {
-            field: "form",
-            message:
-              "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
-            code: "entry_admin_firestore_unavailable",
-          },
-        ],
-      );
+    try {
+      await setDoc(entryRef, entryPayload);
+    } catch (writeError) {
+      const duplicateInspection =
+        await inspectConfirmedEntryAfterWriteFailure(resolvedEntryId);
 
-      logDuplicateDiagnostic({
-        eventId: parsed.data.eventId,
-        normalizedEmail,
-        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-        exists: null,
-        paymentStatus: null,
-        entryStatus: null,
-        reason: inspection.reason ?? "unknown",
-      });
-      console.error("Stripe Checkout entry create admin setup failed", {
-        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-        eventId: parsed.data.eventId,
-        normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
-        inspection,
-        validationResult: failure,
-        formData: rawInput,
-      });
-
-      return Response.json(failure, { status: failure.status });
-    }
-
-    if (!("ref" in inspection) || !inspection.ref) {
-      const failure = buildFailure(
-        500,
-        "unexpected_error",
-        "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
-        [
-          {
-            field: "form",
-            message:
-              "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
-            code: "entry_admin_ref_missing",
-          },
-        ],
-      );
-
-      console.error("Stripe Checkout entry document reference missing", {
-        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-        eventId: parsed.data.eventId,
-        normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
-        inspection,
-        validationResult: failure,
-        formData: rawInput,
-      });
-
-      return Response.json(failure, { status: failure.status });
-    }
-
-    if (inspection.exists) {
-      logDuplicateDiagnostic({
-        eventId: parsed.data.eventId,
-        normalizedEmail,
-        entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-        exists: inspection.exists,
-        paymentStatus: inspection.paymentStatus,
-        entryStatus: inspection.entryStatus,
-        reason: inspection.isConfirmed
-          ? "confirmed_entry_exists"
-          : "stale_entry_will_be_overwritten",
-      });
-
-      if (inspection.isConfirmed) {
+      if (
+        duplicateInspection.ok &&
+        duplicateInspection.exists &&
+        duplicateInspection.isConfirmed
+      ) {
         const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
         const failure = buildFailure(
           409,
@@ -780,14 +710,24 @@ export async function POST(request: Request) {
           [duplicateError],
         );
 
+        logDuplicateDiagnostic({
+          eventId: parsed.data.eventId,
+          normalizedEmail,
+          entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+          exists: duplicateInspection.exists,
+          paymentStatus: duplicateInspection.paymentStatus,
+          entryStatus: duplicateInspection.entryStatus,
+          reason: "confirmed_entry_exists",
+          writeError,
+        });
         console.error("Stripe Checkout duplicate entry blocked", {
           entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
           eventId: parsed.data.eventId,
           normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
           duplicateCheck: {
-            exists: inspection.exists,
-            paymentStatus: inspection.paymentStatus,
-            entryStatus: inspection.entryStatus,
+            exists: duplicateInspection.exists,
+            paymentStatus: duplicateInspection.paymentStatus,
+            entryStatus: duplicateInspection.entryStatus,
             reason: "confirmed_entry_exists",
           },
           validationResult: failure,
@@ -796,11 +736,7 @@ export async function POST(request: Request) {
 
         return Response.json(failure, { status: failure.status });
       }
-    }
 
-    try {
-      await inspection.ref.set(entryPayload);
-    } catch (writeError) {
       const failure = buildFailure(
         500,
         "unexpected_error",
@@ -819,10 +755,12 @@ export async function POST(request: Request) {
         eventId: parsed.data.eventId,
         normalizedEmail,
         entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
-        exists: inspection.exists,
-        paymentStatus: inspection.paymentStatus,
-        entryStatus: inspection.entryStatus,
-        reason: "admin_entry_set_failed",
+        exists: duplicateInspection.ok ? duplicateInspection.exists : null,
+        paymentStatus: duplicateInspection.ok
+          ? duplicateInspection.paymentStatus
+          : null,
+        entryStatus: duplicateInspection.ok ? duplicateInspection.entryStatus : null,
+        reason: "public_entry_set_failed",
         writeError,
       });
       console.error("Stripe Checkout entry create failed", {
@@ -831,6 +769,7 @@ export async function POST(request: Request) {
         normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
         firestorePath: `${collections.entries}/${getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail)}`,
         error: getErrorDetails(writeError),
+        duplicateInspection,
         validationResult: failure,
         formData: rawInput,
       });

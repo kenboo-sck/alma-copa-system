@@ -260,6 +260,21 @@ service cloud.firestore {
       return publicEntryPaymentUpdateAllowed();
     }
 
+    function confirmedPaidEntry(data) {
+      return data.paymentStatus == "paid"
+        && data.entryStatus == "confirmed";
+    }
+
+    function publicConfirmedEntryReadAllowed(entryId) {
+      return confirmedPaidEntry(resource.data)
+        && entryId == resource.data.eventId + "_" + resource.data.normalizedEmail;
+    }
+
+    function publicEntryReplaceAllowed() {
+      return publicEntryCreateAllowed()
+        && !confirmedPaidEntry(resource.data);
+    }
+
     match /events/{eventId} {
       allow read: if isAdmin()
         || (
@@ -276,9 +291,12 @@ service cloud.firestore {
     }
 
     match /entries/{entryId} {
-      allow read: if isAdmin();
+      allow get: if publicConfirmedEntryReadAllowed(entryId) || isAdmin();
+      allow list: if isAdmin();
       allow create: if publicEntryCreateAllowed() || isAdmin();
-      allow update: if isAdmin();
+      allow update: if publicEntryUpdateAllowed()
+        || publicEntryReplaceAllowed()
+        || isAdmin();
       allow delete: if isAdmin();
     }
 
