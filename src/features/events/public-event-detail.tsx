@@ -7,12 +7,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 
-import {
-  CalendarIcon,
-  ClockIcon,
-  LocationIcon,
-  TrophyIcon,
-} from "@/components/icons";
+import { CalendarIcon, ClockIcon, LocationIcon, TrophyIcon } from "@/components/icons";
 
 import {
   formatDate,
@@ -48,6 +43,26 @@ function InfoLine({
         </p>
         <p className="mt-1 text-base font-semibold leading-7 text-white sm:text-lg">
           {value}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function EarlyEntryPolicyCard() {
+  return (
+    <div className="rounded-3xl border border-alma-gold/45 bg-[linear-gradient(145deg,rgba(21,27,45,0.88),rgba(8,11,22,0.94))] px-5 py-6 shadow-[0_20px_70px_rgba(0,0,0,0.28)] sm:px-7 sm:py-7">
+      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.3em] text-alma-gold/85">
+        EARLY ENTRY POLICY
+      </p>
+      <div className="mt-4 space-y-5 text-sm font-semibold leading-8 text-zinc-100 sm:text-base sm:leading-9">
+        <p>本大会は早期エントリー制を採用しております。</p>
+        <p>
+          目標をいち早く定め、トレーニングに集中したい選手を支援するため、早期のお申し込みには優待価格を適用いたします。
+        </p>
+        <p>決断の早さが、ケージでの余裕を生む。</p>
+        <p>
+          スムーズな大会運営へのご協力に感謝し、皆様のエントリーをお待ちしております。
         </p>
       </div>
     </div>
@@ -183,9 +198,7 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
         <div className="relative z-20 mx-auto flex min-h-[64vh] w-full max-w-[1200px] items-end px-4 py-7 sm:min-h-[68vh] sm:px-6 sm:py-9 lg:min-h-[58vh] lg:px-8 lg:py-10">
           <div className="max-w-[54rem] pb-1 sm:pb-2">
             <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.32em] text-zinc-200/80">
-              <span className="text-alma-gold">
-                柔術大会
-              </span>
+              <span className="text-alma-gold">柔術大会</span>
               <span className="h-px w-8 bg-alma-gold/70" aria-hidden="true" />
               <span className="text-zinc-100/90">
                 {entryState?.label ?? "受付状況"}
@@ -262,6 +275,8 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
               </div>
             </div>
 
+            <EarlyEntryPolicyCard />
+
             <div className="border-b border-white/10 pb-8">
               <p className="text-xs font-semibold uppercase tracking-[0.34em] text-alma-gold/90">
                 Entry Fee
@@ -292,7 +307,13 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                           現在受付中
                         </span>
                       ) : null}
-                      <h3 className={isActive ? "mt-4 text-lg font-black text-white" : "text-lg font-black text-white"}>
+                      <h3
+                        className={
+                          isActive
+                            ? "mt-4 text-lg font-black text-white"
+                            : "text-lg font-black text-white"
+                        }
+                      >
                         {feeCard.title}
                       </h3>
                       <p className="mt-4 text-3xl font-black text-alma-gold">
@@ -321,7 +342,8 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                     大会コンセプト
                   </p>
                   <p className="mt-2 text-base leading-7 text-zinc-300">
-                    {event.description || "緊張感とリスペクトを大切にしたブラジリアン柔術大会です。"}
+                    {event.description ||
+                      "緊張感とリスペクトを大切にしたブラジリアン柔術大会です。"}
                   </p>
                 </div>
                 <div>
@@ -367,7 +389,7 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                 ENTRY NOW
               </div>
               <h2 className="mt-4 text-2xl font-black text-white">
-                {hasEntry ? "エントリー受付中" : entryState?.label ?? "受付状況"}
+                {hasEntry ? "エントリー受付中" : (entryState?.label ?? "受付状況")}
               </h2>
               <p className="mt-3 text-sm leading-7 text-zinc-300">
                 定員に達し次第締切となります。受付期間をご確認のうえ、お早めにお申し込みください。
@@ -376,7 +398,9 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
               <div className="mt-5 space-y-3 border-t border-white/10 pt-5">
                 <div className="flex items-center justify-between gap-4 text-sm">
                   <span className="text-zinc-500">開催日</span>
-                  <span className="font-semibold text-white">{formatDate(event.eventDate)}</span>
+                  <span className="font-semibold text-white">
+                    {formatDate(event.eventDate)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
                   <span className="text-zinc-500">会場</span>
@@ -386,7 +410,9 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                 </div>
                 <div className="flex items-center justify-between gap-4 text-sm">
                   <span className="text-zinc-500">受付</span>
-                  <span className="font-semibold text-white">{entryState?.label ?? "-"}</span>
+                  <span className="font-semibold text-white">
+                    {entryState?.label ?? "-"}
+                  </span>
                 </div>
               </div>
 
