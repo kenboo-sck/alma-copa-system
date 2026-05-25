@@ -12,6 +12,7 @@ import {
   buildDuplicateEmailFieldError,
   buildEntryDocumentId,
   mapZodIssuesToFieldErrors,
+  maskEmail,
   normalizeEmail,
   sanitizeValidationInput,
   type EntryValidationFieldError,
@@ -174,7 +175,68 @@ function isConfirmedEntry(data: Record<string, unknown>) {
   return data.entryStatus === "confirmed" || data.paymentStatus === "paid";
 }
 
-async function clearStaleEntryReservation(entryId: string) {
+function getSafeDuplicateDiagnosticValue(value: string) {
+  if (process.env.NODE_ENV === "production") {
+    return maskEmail(value);
+  }
+
+  return value;
+}
+
+function getSafeEntryIdForLog(eventId: string, normalizedEmail: string) {
+  if (process.env.NODE_ENV === "production") {
+    return buildEntryDocumentId(eventId, maskEmail(normalizedEmail));
+  }
+
+  return buildEntryDocumentId(eventId, normalizedEmail);
+}
+
+function logDuplicateDiagnostic({
+  eventId,
+  normalizedEmail,
+  entryId,
+  exists,
+  paymentStatus,
+  entryStatus,
+  reason,
+  writeError,
+}: {
+  eventId: string;
+  normalizedEmail: string;
+  entryId: string;
+  exists: boolean | null;
+  paymentStatus: unknown;
+  entryStatus: unknown;
+  reason: string;
+  writeError?: unknown;
+}) {
+  console.error("Entry duplicate check diagnostic", {
+    collectionName: collections.entries,
+    path: `${collections.entries}/${entryId}`,
+    eventId,
+    normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+    entryId,
+    exists,
+    paymentStatus:
+      typeof paymentStatus === "string" || paymentStatus === null
+        ? paymentStatus
+        : typeof paymentStatus,
+    entryStatus:
+      typeof entryStatus === "string" || entryStatus === null
+        ? entryStatus
+        : typeof entryStatus,
+    reason,
+    error:
+      writeError instanceof Error
+        ? {
+            name: writeError.name,
+            message: writeError.message,
+          }
+        : (writeError ?? null),
+  });
+}
+
+async function inspectEntryDocument(entryId: string) {
   const missingAdminEnv = getMissingAdminFirestoreEnvNames();
 
   if (missingAdminEnv.length > 0) {
@@ -192,18 +254,45 @@ async function clearStaleEntryReservation(entryId: string) {
     .get();
 
   if (!entrySnapshot.exists) {
-    return { ok: false, reason: "entry_not_found" as const };
+    return {
+      ok: true,
+      exists: false,
+      paymentStatus: null,
+      entryStatus: null,
+      ref: entrySnapshot.ref,
+    };
   }
 
-  const data = entrySnapshot.data();
+  const data = entrySnapshot.data() ?? {};
 
-  if (data && isConfirmedEntry(data)) {
-    return { ok: false, reason: "confirmed_entry_exists" as const };
+  return {
+    ok: true,
+    exists: true,
+    paymentStatus: data.paymentStatus ?? null,
+    entryStatus: data.entryStatus ?? null,
+    isConfirmed: isConfirmedEntry(data),
+    ref: entrySnapshot.ref,
+  };
+}
+
+async function clearStaleEntryReservation(entryId: string) {
+  const inspection = await inspectEntryDocument(entryId);
+
+  if (!inspection.ok) {
+    return inspection;
   }
 
-  await entrySnapshot.ref.delete();
+  if (!inspection.exists) {
+    return { ok: false, reason: "entry_not_found" as const, inspection };
+  }
 
-  return { ok: true, reason: "stale_entry_deleted" as const };
+  if (inspection.isConfirmed) {
+    return { ok: false, reason: "confirmed_entry_exists" as const, inspection };
+  }
+
+  await inspection.ref.delete();
+
+  return { ok: true, reason: "stale_entry_deleted" as const, inspection };
 }
 
 function buildServerConfigFailure() {
@@ -562,8 +651,71 @@ export async function POST(request: Request) {
       }));
 
       if (staleReservationResult.ok) {
+        const inspection =
+          "inspection" in staleReservationResult
+            ? staleReservationResult.inspection
+            : null;
+        logDuplicateDiagnostic({
+          eventId: parsed.data.eventId,
+          normalizedEmail,
+          entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+          exists: inspection?.exists ?? null,
+          paymentStatus: inspection?.paymentStatus ?? null,
+          entryStatus: inspection?.entryStatus ?? null,
+          reason: staleReservationResult.reason ?? "unknown",
+          writeError,
+        });
         await setDoc(entryRef, entryPayload);
       } else {
+        const inspection =
+          "inspection" in staleReservationResult
+            ? staleReservationResult.inspection
+            : null;
+        const exists =
+          inspection && "exists" in inspection ? (inspection.exists ?? null) : null;
+        const paymentStatus =
+          inspection && "paymentStatus" in inspection ? inspection.paymentStatus : null;
+        const entryStatus =
+          inspection && "entryStatus" in inspection ? inspection.entryStatus : null;
+
+        logDuplicateDiagnostic({
+          eventId: parsed.data.eventId,
+          normalizedEmail,
+          entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+          exists,
+          paymentStatus,
+          entryStatus,
+          reason: staleReservationResult.reason ?? "unknown",
+          writeError,
+        });
+
+        if (staleReservationResult.reason !== "confirmed_entry_exists") {
+          const failure = buildFailure(
+            500,
+            "unexpected_error",
+            "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+            [
+              {
+                field: "form",
+                message:
+                  "エントリー情報の作成に失敗しました。時間をおいて再度お試しください。",
+                code: "entry_create_failed",
+              },
+            ],
+          );
+
+          console.error("Stripe Checkout entry create failed before duplicate", {
+            entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
+            eventId: parsed.data.eventId,
+            normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+            reason: staleReservationResult.reason,
+            validationResult: failure,
+            formData: rawInput,
+          });
+
+          return Response.json(failure, { status: failure.status });
+        }
+
         const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
         const failure = buildFailure(
           409,
@@ -573,10 +725,15 @@ export async function POST(request: Request) {
         );
 
         console.error("Stripe Checkout entry create failed", {
-          entryId: resolvedEntryId,
+          entryId: getSafeEntryIdForLog(parsed.data.eventId, normalizedEmail),
           eventId: parsed.data.eventId,
-          normalizedEmail,
-          staleReservationResult,
+          normalizedEmail: getSafeDuplicateDiagnosticValue(normalizedEmail),
+          duplicateCheck: {
+            exists,
+            paymentStatus,
+            entryStatus,
+            reason: staleReservationResult.reason,
+          },
           validationResult: failure,
           formData: rawInput,
           error:
