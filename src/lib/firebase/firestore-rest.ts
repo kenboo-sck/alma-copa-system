@@ -32,6 +32,13 @@ function getFirestoreBaseUrl() {
   return `https://firestore.googleapis.com/v1/projects/${getFirebaseProjectId()}/databases/(default)/documents`;
 }
 
+function encodeDocumentPath(path: string) {
+  return path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 export function decodeFirestoreFields(
   fields: Record<string, FirestoreRestValue> | undefined,
 ): Record<string, unknown> {
@@ -117,7 +124,7 @@ export async function getFirestoreDocumentWithAuth(
   path: string,
   idToken: string,
 ): Promise<Record<string, unknown> | null> {
-  const response = await fetch(`${getFirestoreBaseUrl()}/${path}`, {
+  const response = await fetch(`${getFirestoreBaseUrl()}/${encodeDocumentPath(path)}`, {
     headers: {
       Authorization: `Bearer ${idToken}`,
     },

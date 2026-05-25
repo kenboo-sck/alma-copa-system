@@ -117,7 +117,7 @@ async function sendManualEmails(input: {
   mailType: "manual_bulk";
   subject: string;
   body: string;
-  entryIds: string[];
+  entries: EntryRecipient[];
 }) {
   const response = await fetch("/api/admin/emails/send", {
     method: "POST",
@@ -129,7 +129,13 @@ async function sendManualEmails(input: {
       mailType: input.mailType,
       subject: input.subject,
       body: input.body,
-      recipients: input.entryIds.map((entryId) => ({ entryId })),
+      recipients: input.entries.map((entry) => ({
+        entryId: entry.id,
+        eventId: entry.eventId,
+        eventTitle: entry.eventTitle,
+        recipientEmail: entry.email,
+        recipientName: entry.name,
+      })),
     }),
   });
   const data = (await response.json().catch(() => null)) as {
@@ -365,7 +371,7 @@ export function AdminEmailLogsManager() {
         mailType: "manual_bulk",
         subject,
         body,
-        entryIds: bulkTargets.map((entry) => entry.id),
+        entries: bulkTargets,
       });
       const sentCount = result?.sentCount ?? 0;
       const failedCount = result?.failedCount ?? 0;

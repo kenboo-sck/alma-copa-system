@@ -17,7 +17,11 @@ import {
 export const runtime = "nodejs";
 
 const recipientSchema = z.object({
-  entryId: z.string().min(1),
+  entryId: z.string().trim().min(1, "entryId is required."),
+  eventId: z.string().trim().optional(),
+  eventTitle: z.string().trim().optional(),
+  recipientEmail: z.email().optional(),
+  recipientName: z.string().trim().optional(),
 });
 
 const manualEmailSchema = z.object({
@@ -35,18 +39,61 @@ type ResolvedRecipient = {
   recipientName: string;
 };
 
+type RecipientInput = z.infer<typeof recipientSchema>;
+
 function stringField(data: Record<string, unknown>, key: string) {
   const value = data[key];
   return typeof value === "string" ? value : "";
 }
 
-async function resolveRecipient(entryId: string, idToken: string) {
+function fallbackRecipient(input: RecipientInput): ResolvedRecipient | null {
+  const entryId = input.entryId.trim();
+  const eventId = input.eventId?.trim() ?? "";
+  const eventTitle = input.eventTitle?.trim() ?? "";
+  const recipientEmail = input.recipientEmail?.trim() ?? "";
+  const recipientName = input.recipientName?.trim() ?? "";
+
+  if (!entryId || !eventId || !eventTitle || !recipientEmail || !recipientName) {
+    return null;
+  }
+
+  return {
+    entryId,
+    eventId,
+    eventTitle,
+    recipientEmail,
+    recipientName,
+  };
+}
+
+function assertResolvedRecipient(recipient: ResolvedRecipient) {
+  if (!recipient.entryId) {
+    throw new Error("ENTRY_ID_REQUIRED");
+  }
+  if (!recipient.recipientEmail) {
+    throw new Error("RECIPIENT_EMAIL_REQUIRED");
+  }
+  if (!recipient.recipientName) {
+    throw new Error("RECIPIENT_NAME_REQUIRED");
+  }
+  if (!recipient.eventTitle) {
+    throw new Error("EVENT_TITLE_REQUIRED");
+  }
+}
+
+async function resolveRecipient(input: RecipientInput, idToken: string) {
+  const entryId = input.entryId.trim();
   const entry = await getFirestoreDocumentWithAuth(
     `${collections.entries}/${entryId}`,
     idToken,
   );
 
   if (!entry) {
+    const fallback = fallbackRecipient(input);
+    if (fallback) {
+      return fallback;
+    }
+
     throw new Error("ENTRY_NOT_FOUND");
   }
 
@@ -59,9 +106,24 @@ async function resolveRecipient(entryId: string, idToken: string) {
   };
 
   if (!recipient.recipientEmail || !recipient.recipientName) {
+    const fallback = fallbackRecipient(input);
+    if (fallback) {
+      return fallback;
+    }
+
     throw new Error("ENTRY_EMAIL_MISSING");
   }
 
+  if (!recipient.eventTitle) {
+    const fallback = fallbackRecipient(input);
+    if (fallback) {
+      return fallback;
+    }
+
+    throw new Error("EVENT_TITLE_REQUIRED");
+  }
+
+  assertResolvedRecipient(recipient);
   return recipient;
 }
 
@@ -79,6 +141,12 @@ async function writeManualMailLog(input: {
   provider: string;
 }) {
   const logId = createMailLogId();
+  const hasRequiredRecipientFields =
+    Boolean(input.recipient?.recipientEmail) && Boolean(input.recipient?.eventTitle);
+  const logStatus = hasRequiredRecipientFields ? input.status : "failed";
+  const logErrorMessage = hasRequiredRecipientFields
+    ? input.errorMessage
+    : (input.errorMessage ?? "RECIPIENT_LOG_FIELDS_MISSING");
 
   await createFirestoreDocumentWithAuth(
     collections.emailLogs,
@@ -94,8 +162,8 @@ async function writeManualMailLog(input: {
       mailType: input.mailType,
       subject: input.subject,
       bodyPreview: buildBodyPreview(input.body),
-      status: input.status,
-      errorMessage: input.errorMessage,
+      status: logStatus,
+      errorMessage: logErrorMessage,
       provider: input.provider,
       sentAt: new Date(),
       createdAt: new Date(),
@@ -145,8 +213,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const uniqueEntryIds = Array.from(
-    new Set(parsed.data.recipients.map((recipient) => recipient.entryId)),
+  const uniqueRecipients = Array.from(
+    new Map(
+      parsed.data.recipients.map((recipient) => [recipient.entryId.trim(), recipient]),
+    ).values(),
   );
   const resolvedRecipients: ResolvedRecipient[] = [];
   const failedResults: Array<{
@@ -156,9 +226,14 @@ export async function POST(request: Request) {
     errorMessage: string;
   }> = [];
 
-  for (const entryId of uniqueEntryIds) {
+  for (const recipientInput of uniqueRecipients) {
+    const entryId = recipientInput.entryId.trim();
     try {
-      const recipient = await resolveRecipient(entryId, verifiedAdmin.idToken);
+      if (!entryId) {
+        throw new Error("ENTRY_ID_REQUIRED");
+      }
+
+      const recipient = await resolveRecipient(recipientInput, verifiedAdmin.idToken);
       const normalizedEmail = recipient.recipientEmail.trim().toLowerCase();
       const isDuplicate = resolvedRecipients.some(
         (item) => item.recipientEmail.trim().toLowerCase() === normalizedEmail,
@@ -176,11 +251,12 @@ export async function POST(request: Request) {
         errorMessage,
       });
 
+      const fallback = fallbackRecipient(recipientInput);
       await writeManualMailLog({
         idToken: verifiedAdmin.idToken,
         adminUid: verifiedAdmin.adminUser.uid,
         adminEmail: verifiedAdmin.adminUser.email,
-        recipient: null,
+        recipient: fallback,
         fallbackEntryId: entryId,
         mailType: parsed.data.mailType,
         subject: parsed.data.subject,

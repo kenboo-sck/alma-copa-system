@@ -119,7 +119,7 @@ function csvCell(value: string) {
 
 async function sendIndividualEmail(input: {
   token: string;
-  entryId: string;
+  entry: AdminEntry;
   subject: string;
   body: string;
 }) {
@@ -133,7 +133,15 @@ async function sendIndividualEmail(input: {
       mailType: "manual_individual",
       subject: input.subject,
       body: input.body,
-      recipients: [{ entryId: input.entryId }],
+      recipients: [
+        {
+          entryId: input.entry.id,
+          eventId: input.entry.eventId,
+          eventTitle: input.entry.eventTitle,
+          recipientEmail: input.entry.email,
+          recipientName: input.entry.name,
+        },
+      ],
     }),
   });
   const data = (await response.json().catch(() => null)) as {
@@ -409,7 +417,7 @@ export function AdminEntriesManager({
 
       const result = await sendIndividualEmail({
         token,
-        entryId: mailEntry.id,
+        entry: mailEntry,
         subject,
         body,
       });
