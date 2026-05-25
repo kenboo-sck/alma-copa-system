@@ -108,6 +108,7 @@ export class StripeProvider {
         eventId: input.eventId,
         eventTitle: input.eventTitle,
         entryType: input.entryType ?? "",
+        email: input.email ?? input.customerEmail ?? "",
       },
       payment_intent_data: {
         metadata: {
@@ -115,6 +116,7 @@ export class StripeProvider {
           eventId: input.eventId,
           eventTitle: input.eventTitle,
           entryType: input.entryType ?? "",
+          email: input.email ?? input.customerEmail ?? "",
         },
       },
     });
@@ -146,6 +148,7 @@ export class StripeProvider {
       entryId: session.metadata?.entryId,
       eventId: session.metadata?.eventId,
       eventTitle: session.metadata?.eventTitle,
+      email: session.metadata?.email,
     };
   }
 
@@ -177,6 +180,7 @@ export class StripeProvider {
         type: event.type,
         entryId: session.metadata?.entryId,
         eventId: session.metadata?.eventId,
+        email: session.metadata?.email,
         sessionId: session.id,
         paymentIntentId:
           typeof session.payment_intent === "string"
@@ -192,6 +196,7 @@ export class StripeProvider {
         type: event.type,
         entryId: paymentIntent.metadata?.entryId,
         eventId: paymentIntent.metadata?.eventId,
+        email: paymentIntent.metadata?.email,
         paymentIntentId: paymentIntent.id,
       };
     }

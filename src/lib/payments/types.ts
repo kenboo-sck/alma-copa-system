@@ -21,6 +21,7 @@ export type CreateCheckoutSessionInput = {
   currency: "JPY";
   itemName: string;
   customerEmail?: string;
+  email?: string;
   successUrl?: string;
   cancelUrl?: string;
 };
@@ -29,6 +30,7 @@ export type StripeWebhookEventResult = {
   type: string;
   entryId?: string;
   eventId?: string;
+  email?: string;
   sessionId?: string;
   paymentIntentId?: string;
 };
@@ -46,4 +48,5 @@ export type CheckoutSessionDetails = {
   entryId?: string;
   eventId?: string;
   eventTitle?: string;
+  email?: string;
 };

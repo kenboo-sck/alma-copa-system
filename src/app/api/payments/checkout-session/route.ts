@@ -792,6 +792,7 @@ export async function POST(request: Request) {
       amount: totalAmountNow,
       currency: parsed.data.currency,
       itemName: parsed.data.itemName,
+      email: parsed.data.email,
       customerEmail: parsed.data.customerEmail ?? parsed.data.email,
       successUrl,
       cancelUrl,
