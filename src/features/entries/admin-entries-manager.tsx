@@ -2,6 +2,7 @@
 
 import {
   collection,
+  deleteDoc,
   doc,
   onSnapshot,
   serverTimestamp,
@@ -254,8 +255,7 @@ export function AdminEntriesManager({
           .toLowerCase()
           .includes(query);
       const matchesPayment =
-        paymentStatusFilter === "all" ||
-        entry.paymentStatus === paymentStatusFilter;
+        paymentStatusFilter === "all" || entry.paymentStatus === paymentStatusFilter;
       const matchesEvent = eventFilter === "all" || entry.eventId === eventFilter;
 
       return matchesSearch && matchesPayment && matchesEvent;
@@ -347,6 +347,26 @@ export function AdminEntriesManager({
       weighInStatus: weighed ? "weighed" : "not_weighed",
       weighInAt: weighed ? serverTimestamp() : null,
     });
+  }
+
+  async function deleteEntry(entry: AdminEntry) {
+    const confirmed = window.confirm(
+      `「${entry.name}」のエントリーを削除しますか？同じメールアドレスで再エントリー可能になります。`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      await deleteDoc(doc(db, collections.entries, entry.id));
+      setToast("エントリーを削除しました。");
+    } catch (caughtError) {
+      console.error(caughtError);
+      setError("エントリーの削除に失敗しました。管理者権限を確認してください。");
+    }
   }
 
   return (
@@ -496,6 +516,13 @@ export function AdminEntriesManager({
                   >
                     QR表示
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void deleteEntry(entry)}
+                    className="rounded-md border border-red-800/70 px-3 py-2 text-sm text-red-200 hover:border-red-500 hover:text-red-100"
+                  >
+                    削除
+                  </button>
                 </div>
               </article>
             ))}
@@ -592,6 +619,13 @@ export function AdminEntriesManager({
                             className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
                           >
                             QR
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteEntry(entry)}
+                            className="rounded-md border border-red-800/70 px-2 py-1.5 text-xs text-red-200 hover:border-red-500 hover:text-red-100"
+                          >
+                            削除
                           </button>
                         </div>
                       </td>

@@ -22,6 +22,10 @@ import {
   getMissingPublicFirestoreEnvNames,
   getPublicFirestore,
 } from "@/lib/firebase/public-firestore";
+import {
+  getAdminFirestore,
+  getMissingAdminFirestoreEnvNames,
+} from "@/lib/firebase/admin";
 import { getSiteUrl } from "@/lib/site-url";
 import { paymentService } from "@/lib/payments";
 import {
@@ -164,6 +168,42 @@ function logSchemaFailure(
     },
     formData: input,
   });
+}
+
+function isConfirmedEntry(data: Record<string, unknown>) {
+  return data.entryStatus === "confirmed" || data.paymentStatus === "paid";
+}
+
+async function clearStaleEntryReservation(entryId: string) {
+  const missingAdminEnv = getMissingAdminFirestoreEnvNames();
+
+  if (missingAdminEnv.length > 0) {
+    return {
+      ok: false,
+      reason: "admin_config_missing" as const,
+      missingAdminEnv,
+    };
+  }
+
+  const adminDb = getAdminFirestore();
+  const entrySnapshot = await adminDb
+    .collection(collections.entries)
+    .doc(entryId)
+    .get();
+
+  if (!entrySnapshot.exists) {
+    return { ok: false, reason: "entry_not_found" as const };
+  }
+
+  const data = entrySnapshot.data();
+
+  if (data && isConfirmedEntry(data)) {
+    return { ok: false, reason: "confirmed_entry_exists" as const };
+  }
+
+  await entrySnapshot.ref.delete();
+
+  return { ok: true, reason: "stale_entry_deleted" as const };
 }
 
 function buildServerConfigFailure() {
@@ -407,7 +447,7 @@ export async function POST(request: Request) {
 
     const athleteCount =
       parsed.data.entryType === "representative"
-        ? parsed.data.athletes?.length ?? 0
+        ? (parsed.data.athletes?.length ?? 0)
         : 1;
     const pricingNow = getCurrentEntryFee(
       mapPublicEvent(parsed.data.eventId, eventData),
@@ -415,10 +455,7 @@ export async function POST(request: Request) {
     const totalAmountNow = pricingNow.entryFee * athleteCount;
     const normalizedEmail =
       parsed.data.normalizedEmail ?? normalizeEmail(parsed.data.email);
-    const resolvedEntryId = buildEntryDocumentId(
-      parsed.data.eventId,
-      normalizedEmail,
-    );
+    const resolvedEntryId = buildEntryDocumentId(parsed.data.eventId, normalizedEmail);
 
     if (parsed.data.entryId !== resolvedEntryId) {
       console.error("Stripe Checkout entryId mismatch detected", {
@@ -430,109 +467,129 @@ export async function POST(request: Request) {
     }
 
     const entryRef = doc(db, collections.entries, resolvedEntryId);
+    const entryPayload = {
+      eventId: parsed.data.eventId,
+      eventTitle: parsed.data.eventTitle,
+      entryType: parsed.data.entryType,
+      entryStatus: "pending_payment",
+      paymentStatus: "pending",
+      paymentProvider: "stripe",
+      name: parsed.data.name,
+      kana: parsed.data.kana,
+      email: parsed.data.email,
+      normalizedEmail,
+      phone: parsed.data.phone,
+      gender: parsed.data.gender,
+      birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
+      gym:
+        parsed.data.entryType === "representative" && parsed.data.representative
+          ? parsed.data.representative.gym
+          : parsed.data.gym,
+      postalCode:
+        parsed.data.entryType === "representative" && parsed.data.representative
+          ? parsed.data.representative.postalCode
+          : parsed.data.postalCode,
+      prefecture:
+        parsed.data.entryType === "representative" && parsed.data.representative
+          ? parsed.data.representative.prefecture
+          : parsed.data.prefecture,
+      city:
+        parsed.data.entryType === "representative" && parsed.data.representative
+          ? parsed.data.representative.city
+          : parsed.data.city,
+      addressLine:
+        parsed.data.entryType === "representative" && parsed.data.representative
+          ? parsed.data.representative.addressLine
+          : parsed.data.addressLine,
+      category: parsed.data.category,
+      ageCategory: parsed.data.ageCategory,
+      weightClass: parsed.data.weightClass,
+      openClass: parsed.data.openClass ?? "no",
+      athlete:
+        parsed.data.entryType === "individual"
+          ? {
+              name: parsed.data.name,
+              kana: parsed.data.kana,
+              gender: parsed.data.gender,
+              birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
+              category: parsed.data.category,
+              ageCategory: parsed.data.ageCategory,
+              weightClass: parsed.data.weightClass,
+              openClass: parsed.data.openClass ?? "no",
+            }
+          : null,
+      representative: parsed.data.representative ?? null,
+      athletes: parsed.data.athletes ?? [],
+      entryFee: pricingNow.entryFee,
+      priceType: pricingNow.priceType,
+      athleteCount,
+      receptionStatus: "not_checked_in",
+      weighInStatus: "not_weighed",
+      bibNumber: "",
+      bracketPosition: "",
+      checkedInAt: null,
+      weighInAt: null,
+      participantCount: athleteCount,
+      categoryEntryCount: athleteCount,
+      subtotalAmount: totalAmountNow,
+      discountAmount: 0,
+      totalAmount: totalAmountNow,
+      currency: "JPY",
+      stripeSessionId: "",
+      stripeCheckoutSessionId: "",
+      stripePaymentIntentId: "",
+      paymentFailedAt: null,
+      paidAt: null,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    };
 
     try {
-      await setDoc(entryRef, {
-        eventId: parsed.data.eventId,
-        eventTitle: parsed.data.eventTitle,
-        entryType: parsed.data.entryType,
-        entryStatus: "pending_payment",
-        paymentStatus: "pending",
-        paymentProvider: "stripe",
-        name: parsed.data.name,
-        kana: parsed.data.kana,
-        email: parsed.data.email,
-        normalizedEmail,
-        phone: parsed.data.phone,
-        gender: parsed.data.gender,
-        birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
-        gym:
-          parsed.data.entryType === "representative" && parsed.data.representative
-            ? parsed.data.representative.gym
-            : parsed.data.gym,
-        postalCode:
-          parsed.data.entryType === "representative" && parsed.data.representative
-            ? parsed.data.representative.postalCode
-            : parsed.data.postalCode,
-        prefecture:
-          parsed.data.entryType === "representative" && parsed.data.representative
-            ? parsed.data.representative.prefecture
-            : parsed.data.prefecture,
-        city:
-          parsed.data.entryType === "representative" && parsed.data.representative
-            ? parsed.data.representative.city
-            : parsed.data.city,
-        addressLine:
-          parsed.data.entryType === "representative" && parsed.data.representative
-            ? parsed.data.representative.addressLine
-            : parsed.data.addressLine,
-        category: parsed.data.category,
-        ageCategory: parsed.data.ageCategory,
-        weightClass: parsed.data.weightClass,
-        openClass: parsed.data.openClass ?? "no",
-        athlete:
-          parsed.data.entryType === "individual"
-            ? {
-                name: parsed.data.name,
-                kana: parsed.data.kana,
-                gender: parsed.data.gender,
-                birthDate: Timestamp.fromDate(new Date(parsed.data.birthDate)),
-                category: parsed.data.category,
-                ageCategory: parsed.data.ageCategory,
-                weightClass: parsed.data.weightClass,
-                openClass: parsed.data.openClass ?? "no",
-              }
-            : null,
-        representative: parsed.data.representative ?? null,
-        athletes: parsed.data.athletes ?? [],
-        entryFee: pricingNow.entryFee,
-        priceType: pricingNow.priceType,
-        athleteCount,
-        receptionStatus: "not_checked_in",
-        weighInStatus: "not_weighed",
-        bibNumber: "",
-        bracketPosition: "",
-        checkedInAt: null,
-        weighInAt: null,
-        participantCount: athleteCount,
-        categoryEntryCount: athleteCount,
-        subtotalAmount: totalAmountNow,
-        discountAmount: 0,
-        totalAmount: totalAmountNow,
-        currency: "JPY",
-        stripeSessionId: "",
-        stripeCheckoutSessionId: "",
-        stripePaymentIntentId: "",
-        paymentFailedAt: null,
-        paidAt: null,
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
+      await setDoc(entryRef, entryPayload);
     } catch (writeError) {
-      const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
-      const failure = buildFailure(
-        409,
-        "duplicate_email_check",
-        duplicateError.message,
-        [duplicateError],
-      );
-
-      console.error("Stripe Checkout entry create failed", {
-        entryId: resolvedEntryId,
-        eventId: parsed.data.eventId,
-        normalizedEmail,
-        validationResult: failure,
-        formData: rawInput,
-        error:
-          writeError instanceof Error
+      const staleReservationResult = await clearStaleEntryReservation(
+        resolvedEntryId,
+      ).catch((cleanupError) => ({
+        ok: false,
+        reason: "cleanup_failed" as const,
+        cleanupError:
+          cleanupError instanceof Error
             ? {
-                name: writeError.name,
-                message: writeError.message,
+                name: cleanupError.name,
+                message: cleanupError.message,
               }
-            : writeError,
-      });
+            : cleanupError,
+      }));
 
-      return Response.json(failure, { status: failure.status });
+      if (staleReservationResult.ok) {
+        await setDoc(entryRef, entryPayload);
+      } else {
+        const duplicateError = buildDuplicateEmailFieldError(parsed.data.entryType);
+        const failure = buildFailure(
+          409,
+          "duplicate_email_check",
+          duplicateError.message,
+          [duplicateError],
+        );
+
+        console.error("Stripe Checkout entry create failed", {
+          entryId: resolvedEntryId,
+          eventId: parsed.data.eventId,
+          normalizedEmail,
+          staleReservationResult,
+          validationResult: failure,
+          formData: rawInput,
+          error:
+            writeError instanceof Error
+              ? {
+                  name: writeError.name,
+                  message: writeError.message,
+                }
+              : writeError,
+        });
+
+        return Response.json(failure, { status: failure.status });
+      }
     }
 
     const successUrl =
