@@ -69,6 +69,39 @@ function EarlyEntryPolicyCard() {
   );
 }
 
+function AboutItemCard({
+  label,
+  value,
+  wide,
+}: {
+  label: string;
+  value: string;
+  wide?: boolean;
+}) {
+  return (
+    <article
+      className={`relative overflow-hidden rounded-2xl border border-alma-gold/20 bg-[linear-gradient(145deg,rgba(17,24,39,0.94),rgba(3,7,18,0.98)_62%,rgba(0,0,0,0.96))] p-5 shadow-[0_18px_56px_rgba(0,0,0,0.28)] sm:p-6 ${
+        wide ? "sm:col-span-2" : ""
+      }`}
+    >
+      <div
+        className="absolute inset-y-5 left-0 w-px bg-gradient-to-b from-transparent via-alma-gold/80 to-transparent"
+        aria-hidden="true"
+      />
+      <div
+        className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-alma-gold/45 to-transparent"
+        aria-hidden="true"
+      />
+      <h3 className="text-sm font-black tracking-[0.16em] text-alma-gold sm:text-base">
+        {label}
+      </h3>
+      <p className="mt-4 max-w-[68ch] whitespace-pre-line text-[0.95rem] leading-8 text-zinc-200 sm:text-base sm:leading-8">
+        {value}
+      </p>
+    </article>
+  );
+}
+
 function getAboutText(value: string, fallback: string) {
   return value.trim() || fallback;
 }
@@ -379,16 +412,14 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                   大会紹介
                 </h2>
 
-                <div className="mt-6 grid gap-5 border-y border-white/10 py-6 sm:grid-cols-2">
+                <div className="mt-6 grid gap-4 rounded-3xl border border-alma-gold/20 bg-[radial-gradient(circle_at_top_left,rgba(214,173,69,0.12),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] p-4 sm:grid-cols-2 sm:gap-5 sm:p-5">
                   {aboutItems.map((item) => (
-                    <div key={item.label} className={item.wide ? "sm:col-span-2" : ""}>
-                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-zinc-500">
-                        {item.label}
-                      </p>
-                      <p className="mt-2 whitespace-pre-line text-base leading-7 text-zinc-300">
-                        {item.value}
-                      </p>
-                    </div>
+                    <AboutItemCard
+                      key={item.label}
+                      label={item.label}
+                      value={item.value}
+                      wide={item.wide}
+                    />
                   ))}
                 </div>
               </div>
