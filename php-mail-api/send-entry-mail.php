@@ -16,14 +16,14 @@ $directConfig = [
     'SMTP_USER' => 'noreply@copa-alma.com',
     'SMTP_PASSWORD' => 'm#0UqWJW',
     'MAIL_FROM_ADDRESS' => 'noreply@copa-alma.com',
-    'MAIL_FROM_NAME' => 'ALMA COPA',
+    'MAIL_FROM_NAME' => 'COPA ALMA',
 ];
 
 ob_start();
 
 function api_error_log(string $message): void
 {
-    error_log('ALMA COPA mail API: ' . $message);
+    error_log('COPA ALMA mail API: ' . $message);
 }
 
 function json_response(int $statusCode, array $payload): void
@@ -288,7 +288,7 @@ try {
 
     $mail->CharSet = 'UTF-8';
     $mail->Encoding = 'base64';
-    $mail->setFrom($fromAddress, config_value($config, 'MAIL_FROM_NAME', 'ALMA COPA') ?? 'ALMA COPA');
+    $mail->setFrom($fromAddress, config_value($config, 'MAIL_FROM_NAME', 'COPA ALMA') ?? 'COPA ALMA');
     $mail->addAddress($to);
     $mail->Subject = $subject;
     $mail->isHTML(true);

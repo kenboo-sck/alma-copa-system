@@ -383,8 +383,8 @@ export function AdminEntriesManager({
   function openMailModal(entry: AdminEntry) {
     setMailEntry(entry);
     setMailError(null);
-    setMailSubject(`【ALMA COPA】${entry.eventTitle}について`);
-    setMailBody(`${entry.name} 様\n\nALMA COPA 運営事務局です。\n\n`);
+    setMailSubject(`【COPA ALMA】${entry.eventTitle}について`);
+    setMailBody(`${entry.name} 様\n\nCOPA ALMA 運営事務局です。\n\n`);
   }
 
   async function handleIndividualMailSend() {

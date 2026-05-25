@@ -313,7 +313,7 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                 </button>
               )}
               <span className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-400">
-                ALMA COPA Official Event
+                COPA ALMA Official Event
               </span>
             </div>
           </div>

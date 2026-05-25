@@ -90,7 +90,7 @@ export function PublicNavigation() {
             </span>
             <span>
               <span className="block text-sm font-black uppercase tracking-[0.28em] text-white transition group-hover:text-alma-gold">
-                ALMA COPA
+                COPA ALMA
               </span>
               <span className="block text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-zinc-500">
                 Entry System

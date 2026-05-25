@@ -22,7 +22,7 @@ function LoadingState() {
     <div className="grid min-h-screen place-items-center bg-zinc-950 px-4 text-zinc-100">
       <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 text-center">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
-          ALMA COPA
+          COPA ALMA
         </p>
         <p className="mt-3 text-sm text-zinc-400">認証状態を確認しています。</p>
       </div>
@@ -59,7 +59,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-white/10 bg-zinc-950 px-4 py-5 lg:block">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
-            ALMA COPA
+            COPA ALMA
           </p>
           <p className="mt-1 text-sm text-zinc-400">管理コンソール</p>
         </div>

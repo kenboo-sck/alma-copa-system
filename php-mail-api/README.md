@@ -1,4 +1,4 @@
-# ALMA COPA PHP Mail API
+# COPA ALMA PHP Mail API
 
 お名前.comレンタルサーバーに置く、PHPMailerベースのメール送信APIです。
 
@@ -83,7 +83,7 @@ return [
     'SMTP_USER' => 'mail@example.com',
     'SMTP_PASSWORD' => 'change-me',
     'MAIL_FROM_ADDRESS' => 'noreply@example.com',
-    'MAIL_FROM_NAME' => 'ALMA COPA',
+    'MAIL_FROM_NAME' => 'COPA ALMA',
     'CORS_ALLOWED_ORIGINS' => [
         'https://copa-alma.com',
         'https://*.vercel.app',
@@ -102,7 +102,7 @@ return [
 
 `MAIL_FROM_ADDRESS`: 送信元として表示するメールアドレスです。迷惑メール判定を避けるため、`SMTP_USER` と同じドメインのアドレスを推奨します。
 
-`MAIL_FROM_NAME`: メールの送信者名です。例: `ALMA COPA`
+`MAIL_FROM_NAME`: メールの送信者名です。例: `COPA ALMA`
 
 `CORS_ALLOWED_ORIGINS`: ブラウザからこのAPIを直接呼べるサイトです。本番は `https://copa-alma.com`、Vercel preview検証用に `https://*.vercel.app` を許可しています。
 
@@ -115,7 +115,7 @@ POST JSON:
 ```json
 {
   "to": "customer@example.com",
-  "subject": "ALMA COPA テストメール",
+  "subject": "COPA ALMA テストメール",
   "html": "<p>HTML本文です。</p>",
   "text": "テキスト本文です。"
 }
@@ -154,9 +154,9 @@ curl -i -X POST "https://mail.copa-alma.com/api/send-entry-mail.php" \
   -H "Content-Type: application/json" \
   -d '{
     "to": "your-address@example.com",
-    "subject": "ALMA COPA メールAPIテスト",
-    "html": "<p>ALMA COPA メールAPIのHTMLテストです。</p>",
-    "text": "ALMA COPA メールAPIのテキストテストです。"
+    "subject": "COPA ALMA メールAPIテスト",
+    "html": "<p>COPA ALMA メールAPIのHTMLテストです。</p>",
+    "text": "COPA ALMA メールAPIのテキストテストです。"
   }'
 ```
 
@@ -167,9 +167,9 @@ curl -i -X POST "https://mail.copa-alma.com/api/send-entry-mail.php?debug=1" \
   -H "Content-Type: application/json" \
   -d '{
     "to": "your-address@example.com",
-    "subject": "ALMA COPA メールAPIデバッグテスト",
-    "html": "<p>ALMA COPA メールAPIのHTMLテストです。</p>",
-    "text": "ALMA COPA メールAPIのテキストテストです。"
+    "subject": "COPA ALMA メールAPIデバッグテスト",
+    "html": "<p>COPA ALMA メールAPIのHTMLテストです。</p>",
+    "text": "COPA ALMA メールAPIのテキストテストです。"
   }'
 ```
 
@@ -178,9 +178,9 @@ PowerShell:
 ```powershell
 $body = @{
   to = "your-address@example.com"
-  subject = "ALMA COPA メールAPIテスト"
-  html = "<p>ALMA COPA メールAPIのHTMLテストです。</p>"
-  text = "ALMA COPA メールAPIのテキストテストです。"
+  subject = "COPA ALMA メールAPIテスト"
+  html = "<p>COPA ALMA メールAPIのHTMLテストです。</p>"
+  text = "COPA ALMA メールAPIのテキストテストです。"
 } | ConvertTo-Json
 
 Invoke-RestMethod `
@@ -200,9 +200,9 @@ await fetch("https://mail.copa-alma.com/api/send-entry-mail.php", {
   },
   body: JSON.stringify({
     to: "your-address@example.com",
-    subject: "ALMA COPA メールAPIテスト",
-    html: "<p>ALMA COPA メールAPIのHTMLテストです。</p>",
-    text: "ALMA COPA メールAPIのテキストテストです。",
+    subject: "COPA ALMA メールAPIテスト",
+    html: "<p>COPA ALMA メールAPIのHTMLテストです。</p>",
+    text: "COPA ALMA メールAPIのテキストテストです。",
   }),
 }).then((response) => response.json());
 ```

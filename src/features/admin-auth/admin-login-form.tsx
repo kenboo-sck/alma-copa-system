@@ -45,7 +45,7 @@ export function AdminLoginForm() {
     <main className="grid min-h-screen place-items-center bg-zinc-950 px-4 text-zinc-100">
       <section className="w-full max-w-sm rounded-lg border border-white/10 bg-white/[0.035] p-6 shadow-2xl shadow-black/40">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
-          ALMA COPA
+          COPA ALMA
         </p>
         <h1 className="mt-3 text-2xl font-bold text-white">管理者ログイン</h1>
         <p className="mt-2 text-sm text-zinc-400">

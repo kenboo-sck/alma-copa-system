@@ -1,6 +1,6 @@
-# ALMA COPA Entry System
+# COPA ALMA Entry System
 
-格闘技大会「ALMA COPA」のWebエントリー管理システムです。複数大会、個人エントリー、代表者エントリー、期間別料金、決済ステータス管理、管理画面を前提にしたNext.js + Firebase構成です。
+格闘技大会「COPA ALMA」のWebエントリー管理システムです。複数大会、個人エントリー、代表者エントリー、期間別料金、決済ステータス管理、管理画面を前提にしたNext.js + Firebase構成です。
 
 ## 技術構成
 

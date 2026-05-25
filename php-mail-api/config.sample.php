@@ -17,7 +17,7 @@ return [
     'MAIL_FROM_ADDRESS' => 'noreply@example.com',
 
     // メール本文に表示される送信者名です。
-    'MAIL_FROM_NAME' => 'ALMA COPA',
+    'MAIL_FROM_NAME' => 'COPA ALMA',
 
     // ブラウザから直接テストする場合の許可元です。
     'CORS_ALLOWED_ORIGINS' => [

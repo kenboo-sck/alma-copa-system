@@ -77,7 +77,7 @@ const checkoutSessionSchema = z.object({
   athletes: z.array(checkoutAthleteSchema).optional(),
   amount: z.number().int().positive(),
   currency: z.literal("JPY").default("JPY"),
-  itemName: z.string().min(1).max(120).default("ALMA COPA エントリー費"),
+  itemName: z.string().min(1).max(120).default("COPA ALMA エントリー費"),
   customerEmail: z.email().optional(),
   normalizedEmail: z.string().max(320).optional(),
   successUrl: z.url().optional(),

@@ -111,10 +111,10 @@ export default function HomePage() {
         <div className="relative mx-auto w-full max-w-[1180px] px-4 py-12 sm:px-6 lg:px-8 lg:py-16">
           <div className="max-w-3xl">
             <p className="text-xs font-semibold uppercase tracking-[0.34em] text-alma-gold/90">
-              About ALMA COPA
+              About COPA ALMA
             </p>
             <h2 className="mt-3 text-3xl font-bold text-white sm:text-4xl">
-              ALMA COPAとは
+              COPA ALMAとは
             </h2>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-zinc-400 sm:text-base">
               選手が集中できる競技環境と、運営が扱いやすいエントリー基盤を両立した、

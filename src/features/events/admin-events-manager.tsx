@@ -293,7 +293,7 @@ export function AdminEventsManager() {
           <p className="text-sm font-semibold text-alma-gold">大会運営</p>
           <h1 className="mt-2 text-2xl font-bold text-white">大会管理</h1>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
-            ALMA COPA の大会作成、公開設定、受付期間、エントリー状況を管理します。
+            COPA ALMA の大会作成、公開設定、受付期間、エントリー状況を管理します。
           </p>
         </div>
         <Button onClick={openCreateForm}>大会を追加</Button>

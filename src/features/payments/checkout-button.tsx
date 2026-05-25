@@ -74,7 +74,7 @@ export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) 
           eventId,
           amount,
           currency: "JPY",
-          itemName: "ALMA COPA エントリー費",
+          itemName: "COPA ALMA エントリー費",
         }),
       });
 
@@ -137,7 +137,7 @@ export function CheckoutButton({ eventId, amount = 5000 }: CheckoutButtonProps) 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-alma-gold">
-            ALMA COPA エントリー費
+            COPA ALMA エントリー費
           </p>
           <p className="mt-2 text-2xl font-bold text-white">
             {amount.toLocaleString("ja-JP")}円

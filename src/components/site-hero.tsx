@@ -61,10 +61,10 @@ export function SiteHero() {
       <div className="relative z-20 mx-auto flex min-h-[58vh] w-full max-w-[1180px] items-end px-4 py-7 sm:min-h-[64vh] sm:px-6 sm:py-9 lg:min-h-[58vh] lg:px-8 lg:py-10">
         <div className="max-w-[46rem] pb-1 sm:pb-2">
           <p className="text-[0.65rem] font-semibold uppercase tracking-[0.42em] text-alma-gold/90 sm:text-xs">
-            ALMA COPA Entry System
+            COPA ALMA Entry System
           </p>
           <h1 className="mt-3 text-[clamp(2.8rem,8vw,6.4rem)] font-black uppercase leading-[0.9] tracking-[-0.04em] text-white">
-            ALMA COPA
+            COPA ALMA
           </h1>
           <p className="mt-3 max-w-2xl text-[clamp(1.1rem,2.6vw,2.6rem)] font-black uppercase leading-[1.05] tracking-[0.06em] text-alma-gold">
             TEST YOUR TECHNIQUE.

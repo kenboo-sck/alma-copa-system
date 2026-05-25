@@ -208,7 +208,7 @@ export function EntryTypeSelection({ eventId }: EntryTypeSelectionProps) {
 
         <div className="mt-10 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.26em] text-zinc-500">
           <TrophyIcon size={18} className="text-alma-gold" />
-          ALMA COPA Tournament Entry
+          COPA ALMA Tournament Entry
         </div>
       </section>
     </main>

@@ -21,7 +21,7 @@ function getMailProvider(): MailProvider {
 }
 
 function getFromAddress() {
-  return process.env.MAIL_FROM_ADDRESS || "ALMA COPA <onboarding@resend.dev>";
+  return process.env.MAIL_FROM_ADDRESS || "COPA ALMA <onboarding@resend.dev>";
 }
 
 function getApiKey() {
@@ -108,7 +108,7 @@ function getEntryTypeLabel(entryType: EntryEmailPayload["entryType"]) {
 }
 
 function buildApplicantEmail(payload: EntryEmailPayload) {
-  const subject = `【ALMA COPA】エントリー受付完了: ${payload.eventTitle}`;
+  const subject = `【COPA ALMA】エントリー受付完了: ${payload.eventTitle}`;
   const applicantName = escapeHtml(payload.applicantName);
   const eventTitle = escapeHtml(payload.eventTitle);
   const entryTypeLabel = getEntryTypeLabel(payload.entryType);
@@ -116,7 +116,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
   const text = [
     `${payload.applicantName} 様`,
     "",
-    "この度はALMA COPAへエントリーいただき、誠にありがとうございます。",
+    "この度はCOPA ALMAへエントリーいただき、誠にありがとうございます。",
     "大会運営にて、以下の内容でエントリーを受付いたしました。",
     "",
     `大会名: ${payload.eventTitle}`,
@@ -130,7 +130,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
     "ご不明点がございましたらお気軽にお問い合わせください。",
     `お問い合わせ: ${contactEmail}`,
     "",
-    "ALMA COPA 運営事務局",
+    "COPA ALMA 運営事務局",
   ]
     .filter(Boolean)
     .join("\n");
@@ -146,7 +146,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
       </head>
       <body style="margin:0;padding:0;background-color:#090909;color:#f7f3e8;font-family:Arial,'Helvetica Neue',Helvetica,sans-serif;-webkit-text-size-adjust:100%;text-size-adjust:100%;">
         <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-          ALMA COPAへのエントリーを大会運営にて受付いたしました。
+          COPA ALMAへのエントリーを大会運営にて受付いたしました。
         </div>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;margin:0;padding:0;background-color:#090909;border-collapse:collapse;">
           <tr>
@@ -154,7 +154,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
               <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;">
                 <tr>
                   <td style="padding:0 0 16px 0;text-align:center;">
-                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">ALMA COPA</div>
+                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">COPA ALMA</div>
                     <div style="margin-top:8px;font-size:12px;line-height:1.5;letter-spacing:2px;color:#8f8776;">TOURNAMENT ENTRY</div>
                   </td>
                 </tr>
@@ -177,7 +177,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
                                 <h1 style="margin:0;color:#ffffff;font-size:30px;line-height:1.35;font-weight:700;letter-spacing:0;">エントリーを受付いたしました</h1>
                                 <p style="margin:18px 0 0 0;color:#d9d2c2;font-size:15px;line-height:1.9;">
                                   ${applicantName} 様<br>
-                                  この度はALMA COPAへエントリーいただき、誠にありがとうございます。大会運営にて、以下の内容でしっかりと受付いたしました。
+                                  この度はCOPA ALMAへエントリーいただき、誠にありがとうございます。大会運営にて、以下の内容でしっかりと受付いたしました。
                                 </p>
                               </td>
                             </tr>
@@ -255,7 +255,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
                 <tr>
                   <td style="padding:18px 8px 0 8px;text-align:center;color:#8f8776;font-size:12px;line-height:1.8;">
                     お問い合わせ：<a href="mailto:${contactEmail}" style="color:#d6b25e;text-decoration:none;">${contactEmail}</a><br>
-                    ALMA COPA 運営事務局
+                    COPA ALMA 運営事務局
                   </td>
                 </tr>
               </table>
@@ -270,7 +270,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
 }
 
 function buildAdminEmail(payload: EntryEmailPayload) {
-  const subject = `【ALMA COPA】新規エントリー受付: ${payload.eventTitle}`;
+  const subject = `【COPA ALMA】新規エントリー受付: ${payload.eventTitle}`;
   const text = [
     "管理者各位",
     "",
@@ -319,7 +319,7 @@ function buildEntryEmailMessages(payload: EntryEmailPayload): EntryEmailMessage[
     },
     {
       recipientEmail: adminEmail,
-      recipientName: "ALMA COPA 管理者",
+      recipientName: "COPA ALMA 管理者",
       recipientType: "admin",
       ...admin,
     },
@@ -344,7 +344,7 @@ function buildManualEmail(input: { subject: string; body: string }) {
               <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;">
                 <tr>
                   <td style="padding:0 0 16px 0;text-align:center;">
-                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">ALMA COPA</div>
+                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">COPA ALMA</div>
                   </td>
                 </tr>
                 <tr>
@@ -358,7 +358,7 @@ function buildManualEmail(input: { subject: string; body: string }) {
                 </tr>
                 <tr>
                   <td style="padding:18px 8px 0 8px;text-align:center;color:#8f8776;font-size:12px;line-height:1.8;">
-                    ALMA COPA 運営事務局
+                    COPA ALMA 運営事務局
                   </td>
                 </tr>
               </table>

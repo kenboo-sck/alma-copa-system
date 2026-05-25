@@ -1,6 +1,6 @@
 {
   "name": "alma-copa/mail-api",
-  "description": "ALMA COPA SMTP mail API for rental server deployment.",
+  "description": "COPA ALMA SMTP mail API for rental server deployment.",
   "type": "project",
   "require": {
     "php": ">=7.2",

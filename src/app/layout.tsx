@@ -3,10 +3,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "ALMA COPA Entry System",
-    template: "%s | ALMA COPA",
+    default: "COPA ALMA Entry System",
+    template: "%s | COPA ALMA",
   },
-  description: "ALMA COPA tournament entry and administration system.",
+  description: "COPA ALMA tournament entry and administration system.",
 };
 
 export default function RootLayout({

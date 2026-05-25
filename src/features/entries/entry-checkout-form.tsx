@@ -614,7 +614,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                     {entryState?.label ?? "受付状態不明"}
                   </span>
                   <span className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-500">
-                    ALMA COPA Official Entry
+                    COPA ALMA Official Entry
                   </span>
                 </div>
                 <div>

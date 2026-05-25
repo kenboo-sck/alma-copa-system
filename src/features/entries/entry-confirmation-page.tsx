@@ -503,7 +503,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           athletes: isRepresentative ? values.athletes : undefined,
           amount: totalAmountNow,
           currency: "JPY",
-          itemName: `ALMA COPA エントリー費（${pricingNow.label} / ${athleteCount}名）`,
+          itemName: `COPA ALMA エントリー費（${pricingNow.label} / ${athleteCount}名）`,
           customerEmail: applicantEmail,
           successUrl,
           cancelUrl,

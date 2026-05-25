@@ -33,7 +33,7 @@ export function SiteFooter() {
         <div className="flex flex-col gap-8">
           <div className="max-w-xl">
             <p className="text-xs font-semibold uppercase tracking-[0.38em] text-alma-gold">
-              ALMA COPA Entry System
+              COPA ALMA Entry System
             </p>
             <p className="mt-3 text-sm leading-7 text-zinc-400">
               ブラジリアン柔術大会のエントリー受付システムです。
@@ -60,7 +60,7 @@ export function SiteFooter() {
 
           <div className="border-t border-white/10 pt-6 text-xs text-zinc-500">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <span>© 2026 ALMA COPA. All Rights Reserved.</span>
+              <span>© 2026 COPA ALMA. All Rights Reserved.</span>
               <span className="font-mono">build {buildVersion}</span>
             </div>
           </div>

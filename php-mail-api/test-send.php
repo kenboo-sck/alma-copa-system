@@ -61,9 +61,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $to = trim((string) ($_POST['to'] ?? ''));
     $payload = [
         'to' => $to,
-        'subject' => 'ALMA COPA PHP Mail API Test',
-        'html' => '<p>ALMA COPA PHP Mail API test message.</p>',
-        'text' => 'ALMA COPA PHP Mail API test message.',
+        'subject' => 'COPA ALMA PHP Mail API Test',
+        'html' => '<p>COPA ALMA PHP Mail API test message.</p>',
+        'text' => 'COPA ALMA PHP Mail API test message.',
     ];
     $defaultTo = $to;
     $result = post_json(api_url(), $payload);
@@ -74,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ALMA COPA PHP Mail API Test</title>
+    <title>COPA ALMA PHP Mail API Test</title>
     <style>
       body { margin: 0; background: #111; color: #f5f5f5; font-family: Arial, sans-serif; }
       main { width: min(720px, calc(100% - 32px)); margin: 48px auto; }
@@ -86,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </head>
   <body>
     <main>
-      <h1>ALMA COPA PHP Mail API Test</h1>
+      <h1>COPA ALMA PHP Mail API Test</h1>
       <p>API URL: <?= h(api_url()) ?></p>
       <form method="post">
         <label>

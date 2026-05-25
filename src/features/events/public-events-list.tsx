@@ -144,7 +144,7 @@ export function PublicEventsList() {
                             JIU-JITSU
                           </p>
                           <p className="mt-2 text-2xl font-black uppercase tracking-[0.12em] text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)]">
-                            ALMA COPA
+                            COPA ALMA
                           </p>
                         </div>
                       </div>
