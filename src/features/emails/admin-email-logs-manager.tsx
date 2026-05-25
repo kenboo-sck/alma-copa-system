@@ -49,7 +49,7 @@ type MailStatusFilter = "all" | MailLogStatus;
 const mailTypeLabels: Record<MailType, string> = {
   entry_completed: "エントリー完了",
   manual_individual: "個別送信",
-  manual_bulk: "一斉送信",
+  manual_bulk: "一括メール",
 };
 
 const statusLabels: Record<MailLogStatus, string> = {

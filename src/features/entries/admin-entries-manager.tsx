@@ -157,6 +157,45 @@ async function sendIndividualEmail(input: {
   return data;
 }
 
+async function sendBulkEmail(input: {
+  token: string;
+  entries: AdminEntry[];
+  subject: string;
+  body: string;
+}) {
+  const response = await fetch("/api/admin/emails/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mailType: "manual_bulk",
+      subject: input.subject,
+      body: input.body,
+      recipients: input.entries.map((entry) => ({
+        entryId: entry.id,
+        eventId: entry.eventId,
+        eventTitle: entry.eventTitle,
+        recipientEmail: entry.email,
+        recipientName: entry.name,
+      })),
+    }),
+  });
+  const data = (await response.json().catch(() => null)) as {
+    error?: string;
+    sentCount?: number;
+    failedCount?: number;
+    targetCount?: number;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? "メール送信に失敗しました。");
+  }
+
+  return data;
+}
+
 type AdminEntriesManagerProps = {
   eyebrow?: string;
   title?: string;
@@ -183,6 +222,13 @@ export function AdminEntriesManager({
   const [mailBody, setMailBody] = useState("");
   const [mailError, setMailError] = useState<string | null>(null);
   const [isSendingMail, setIsSendingMail] = useState(false);
+  const [selectedEntryIds, setSelectedEntryIds] = useState<string[]>([]);
+  const [isBulkMailOpen, setIsBulkMailOpen] = useState(false);
+  const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
+  const [bulkMailSubject, setBulkMailSubject] = useState("");
+  const [bulkMailBody, setBulkMailBody] = useState("");
+  const [bulkMailError, setBulkMailError] = useState<string | null>(null);
+  const [isSendingBulkMail, setIsSendingBulkMail] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -249,6 +295,13 @@ export function AdminEntriesManager({
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    setSelectedEntryIds((currentIds) => {
+      const entryIds = new Set(entries.map((entry) => entry.id));
+      return currentIds.filter((entryId) => entryIds.has(entryId));
+    });
+  }, [entries]);
+
   const eventOptions = useMemo(() => {
     const map = new Map<string, string>();
 
@@ -289,6 +342,21 @@ export function AdminEntriesManager({
       return matchesSearch && matchesPayment && matchesEvent;
     });
   }, [entries, eventFilter, paymentStatusFilter, searchQuery]);
+
+  const selectedEntries = useMemo(() => {
+    const selectedIds = new Set(selectedEntryIds);
+    return entries.filter((entry) => selectedIds.has(entry.id));
+  }, [entries, selectedEntryIds]);
+
+  const visibleEntryIds = useMemo(
+    () => visibleEntries.map((entry) => entry.id),
+    [visibleEntries],
+  );
+  const visibleSelectedCount = visibleEntryIds.filter((entryId) =>
+    selectedEntryIds.includes(entryId),
+  ).length;
+  const isAllVisibleSelected =
+    visibleEntryIds.length > 0 && visibleSelectedCount === visibleEntryIds.length;
 
   async function updateEntry(entryId: string, values: Record<string, unknown>) {
     setError(null);
@@ -385,6 +453,131 @@ export function AdminEntriesManager({
     setMailError(null);
     setMailSubject(`【COPA ALMA】${entry.eventTitle}について`);
     setMailBody(`${entry.name} 様\n\nCOPA ALMA 運営事務局です。\n\n`);
+  }
+
+  function toggleEntrySelection(entryId: string) {
+    setSelectedEntryIds((currentIds) =>
+      currentIds.includes(entryId)
+        ? currentIds.filter((currentId) => currentId !== entryId)
+        : [...currentIds, entryId],
+    );
+  }
+
+  function selectAllVisibleEntries() {
+    setSelectedEntryIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+      for (const entryId of visibleEntryIds) {
+        nextIds.add(entryId);
+      }
+      return Array.from(nextIds);
+    });
+  }
+
+  function clearSelectedEntries() {
+    setSelectedEntryIds([]);
+  }
+
+  function openBulkMailModal() {
+    if (selectedEntries.length === 0) {
+      setToast("選手を選択してください。");
+      return;
+    }
+
+    const firstEntry = selectedEntries[0];
+    setBulkMailSubject(`【COPA ALMA】${firstEntry?.eventTitle ?? "大会"}について`);
+    setBulkMailBody("COPA ALMA 運営事務局です。\n\n");
+    setBulkMailError(null);
+    setIsBulkConfirmOpen(false);
+    setIsBulkMailOpen(true);
+  }
+
+  function closeBulkMailModal() {
+    if (isSendingBulkMail) {
+      return;
+    }
+
+    setIsBulkMailOpen(false);
+    setIsBulkConfirmOpen(false);
+    setBulkMailError(null);
+  }
+
+  function openBulkConfirmModal() {
+    const subject = bulkMailSubject.trim();
+    const body = bulkMailBody.trim();
+
+    if (!subject || !body) {
+      setBulkMailError("件名と本文を入力してください。");
+      return;
+    }
+
+    if (selectedEntries.length === 0) {
+      setBulkMailError("送信対象の選手を選択してください。");
+      return;
+    }
+
+    setBulkMailError(null);
+    setIsBulkConfirmOpen(true);
+  }
+
+  async function handleBulkMailSend() {
+    if (isSendingBulkMail) {
+      return;
+    }
+
+    const subject = bulkMailSubject.trim();
+    const body = bulkMailBody.trim();
+
+    if (!subject || !body) {
+      setBulkMailError("件名と本文を入力してください。");
+      setIsBulkConfirmOpen(false);
+      return;
+    }
+
+    if (selectedEntries.length === 0) {
+      setBulkMailError("送信対象の選手を選択してください。");
+      setIsBulkConfirmOpen(false);
+      return;
+    }
+
+    setBulkMailError(null);
+    setIsSendingBulkMail(true);
+
+    try {
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error("管理者認証を確認できませんでした。");
+      }
+
+      const result = await sendBulkEmail({
+        token,
+        entries: selectedEntries,
+        subject,
+        body,
+      });
+      const sentCount = result?.sentCount ?? 0;
+      const failedCount = result?.failedCount ?? 0;
+
+      if (failedCount > 0) {
+        throw new Error(
+          `一括メールの一部送信に失敗しました。送信済み ${sentCount}件 / 失敗 ${failedCount}件。メール履歴を確認してください。`,
+        );
+      }
+
+      setToast(`一括メールを送信しました。送信済み ${sentCount}件。`);
+      setSelectedEntryIds([]);
+      setIsBulkMailOpen(false);
+      setIsBulkConfirmOpen(false);
+    } catch (caughtError) {
+      console.error(caughtError);
+      setBulkMailError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "一括メール送信に失敗しました。",
+      );
+      setIsBulkConfirmOpen(false);
+    } finally {
+      setIsSendingBulkMail(false);
+    }
   }
 
   async function handleIndividualMailSend() {
@@ -512,6 +705,46 @@ export function AdminEntriesManager({
             </select>
           </label>
         </div>
+        <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-zinc-300">
+            選択中{" "}
+            <span className="font-semibold text-alma-gold">
+              {selectedEntries.length}
+            </span>
+            名
+            {visibleEntries.length > 0 ? (
+              <span className="ml-2 text-xs text-zinc-500">
+                表示中 {visibleSelectedCount}/{visibleEntries.length}名
+              </span>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={selectAllVisibleEntries}
+              disabled={visibleEntries.length === 0 || isAllVisibleSelected}
+              className="min-h-10 rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              全選択
+            </button>
+            <button
+              type="button"
+              onClick={clearSelectedEntries}
+              disabled={selectedEntries.length === 0}
+              className="min-h-10 rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              全解除
+            </button>
+            <button
+              type="button"
+              onClick={openBulkMailModal}
+              disabled={selectedEntries.length === 0 || isSendingBulkMail}
+              className="min-h-10 rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              一括メール
+            </button>
+          </div>
+        </div>
       </div>
 
       {isLoading ? (
@@ -532,14 +765,25 @@ export function AdminEntriesManager({
                 className="rounded-lg border border-white/10 bg-white/[0.03] p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-semibold text-white">{entry.name}</h2>
-                    <p className="mt-1 text-sm text-zinc-400">{entry.eventTitle}</p>
+                  <label className="flex min-w-0 items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedEntryIds.includes(entry.id)}
+                      onChange={() => toggleEntrySelection(entry.id)}
+                      className="mt-1 h-4 w-4 accent-alma-gold"
+                      aria-label={`${entry.name}を選択`}
+                    />
+                    <div className="min-w-0">
+                      <h2 className="font-semibold text-white">{entry.name}</h2>
+                      <p className="mt-1 text-sm text-zinc-400">{entry.eventTitle}</p>
+                    </div>
+                  </label>
+                  <div className="shrink-0">
+                    <StatusBadge
+                      label={paymentStatusLabels[entry.paymentStatus]}
+                      tone={paymentStatusTones[entry.paymentStatus]}
+                    />
                   </div>
-                  <StatusBadge
-                    label={paymentStatusLabels[entry.paymentStatus]}
-                    tone={paymentStatusTones[entry.paymentStatus]}
-                  />
                 </div>
                 <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                   <div>
@@ -594,6 +838,26 @@ export function AdminEntriesManager({
               <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead className="border-b border-white/10 bg-black/50 text-xs text-zinc-400">
                   <tr>
+                    <th className="px-4 py-3 font-semibold">
+                      <input
+                        type="checkbox"
+                        checked={isAllVisibleSelected}
+                        onChange={(event) => {
+                          if (event.target.checked) {
+                            selectAllVisibleEntries();
+                          } else {
+                            setSelectedEntryIds((currentIds) =>
+                              currentIds.filter(
+                                (entryId) => !visibleEntryIds.includes(entryId),
+                              ),
+                            );
+                          }
+                        }}
+                        disabled={visibleEntries.length === 0}
+                        className="h-4 w-4 accent-alma-gold disabled:cursor-not-allowed"
+                        aria-label="表示中の選手を全選択"
+                      />
+                    </th>
                     <th className="px-4 py-3 font-semibold">氏名</th>
                     <th className="px-4 py-3 font-semibold">大会</th>
                     <th className="px-4 py-3 font-semibold">種別</th>
@@ -607,6 +871,15 @@ export function AdminEntriesManager({
                 <tbody>
                   {visibleEntries.map((entry) => (
                     <tr key={entry.id} className="border-b border-white/5 align-top">
+                      <td className="px-4 py-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedEntryIds.includes(entry.id)}
+                          onChange={() => toggleEntrySelection(entry.id)}
+                          className="h-4 w-4 accent-alma-gold"
+                          aria-label={`${entry.name}を選択`}
+                        />
+                      </td>
                       <td className="px-4 py-4">
                         <p className="font-semibold text-white">{entry.name}</p>
                         <p className="mt-1 text-xs text-zinc-500">{entry.kana}</p>
@@ -755,6 +1028,129 @@ export function AdminEntriesManager({
                 className="min-h-11 rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSendingMail ? "送信中..." : "送信"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isBulkMailOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-lg border border-alma-gold/40 bg-zinc-950 p-5 shadow-2xl shadow-black">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-alma-gold">一括メール</p>
+                <h2 className="mt-2 text-lg font-bold text-white">
+                  選択中 {selectedEntries.length}名
+                </h2>
+                <p className="mt-1 text-sm text-zinc-400">
+                  選択した選手に同じ内容のメールを送信します。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeBulkMailModal}
+                disabled={isSendingBulkMail}
+                className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+            </div>
+
+            {bulkMailError ? (
+              <div className="mt-4 rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100">
+                {bulkMailError}
+              </div>
+            ) : null}
+
+            <div className="mt-5 max-h-28 overflow-y-auto rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-300">
+              {selectedEntries.map((entry) => (
+                <div key={entry.id} className="flex justify-between gap-3 py-1">
+                  <span className="font-semibold text-white">{entry.name}</span>
+                  <span className="break-all text-xs text-zinc-500">{entry.email}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-zinc-400">件名</span>
+                <input
+                  value={bulkMailSubject}
+                  onChange={(event) => setBulkMailSubject(event.target.value)}
+                  disabled={isSendingBulkMail}
+                  className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+              <label className="block space-y-2">
+                <span className="text-xs font-semibold text-zinc-400">本文</span>
+                <textarea
+                  value={bulkMailBody}
+                  onChange={(event) => setBulkMailBody(event.target.value)}
+                  rows={9}
+                  disabled={isSendingBulkMail}
+                  className="w-full rounded-md border border-white/10 bg-black px-3 py-3 text-sm leading-6 text-white outline-none focus:border-alma-gold disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeBulkMailModal}
+                disabled={isSendingBulkMail}
+                className="min-h-11 rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                onClick={openBulkConfirmModal}
+                disabled={
+                  isSendingBulkMail ||
+                  selectedEntries.length === 0 ||
+                  !bulkMailSubject.trim() ||
+                  !bulkMailBody.trim()
+                }
+                className="min-h-11 rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                送信確認へ
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isBulkConfirmOpen ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-lg border border-alma-gold/40 bg-zinc-950 p-5 shadow-2xl shadow-black">
+            <p className="text-sm font-semibold text-alma-gold">送信確認</p>
+            <h2 className="mt-2 text-lg font-bold text-white">
+              {selectedEntries.length}名に一括メールを送信します
+            </h2>
+            <p className="mt-3 text-sm leading-6 text-zinc-400">
+              送信後は各宛先ごとにメール履歴へ「一括メール」として保存されます。
+            </p>
+            <div className="mt-4 rounded-md border border-white/10 bg-black px-3 py-2">
+              <p className="text-xs font-semibold text-zinc-500">件名</p>
+              <p className="mt-1 break-all text-sm text-white">{bulkMailSubject}</p>
+            </div>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setIsBulkConfirmOpen(false)}
+                disabled={isSendingBulkMail}
+                className="min-h-11 rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                戻る
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleBulkMailSend()}
+                disabled={isSendingBulkMail}
+                className="min-h-11 rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSendingBulkMail ? "送信中..." : "送信する"}
               </button>
             </div>
           </div>
