@@ -41,7 +41,7 @@ function getBreadcrumbs(pathname: string) {
     crumbs.push({ label: "確認", href: pathname });
   } else if (pathname === "/payment/success" || pathname === "/entry/success") {
     crumbs.push({ label: "受付完了", href: pathname });
-  } else if (pathname.startsWith("/legal")) {
+  } else if (pathname === "/law" || pathname.startsWith("/legal")) {
     crumbs.push({ label: "LEGAL", href: pathname });
   } else if (pathname.startsWith("/payment") || pathname.startsWith("/entry/")) {
     crumbs.push({ label: "決済", href: pathname });

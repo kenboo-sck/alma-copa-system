@@ -7,7 +7,7 @@ const footerLinks: Array<{
 }> = [
   { label: "トップ", href: "/" },
   { label: "大会一覧", href: "/events" },
-  { label: "特定商取引法に基づく表記", href: "/legal/tokusho" },
+  { label: "特定商取引法に基づく表記", href: "/law" },
   { label: "プライバシーポリシー", href: "/legal/privacy" },
   { label: "利用規約", href: "/legal/terms" },
   { label: "お問い合わせ", href: "mailto:info@alma-copa.jp", external: true },
@@ -32,17 +32,11 @@ export function SiteFooter() {
               {footerLinks.map((link) => (
                 <li key={link.label}>
                   {link.external ? (
-                    <a
-                      href={link.href}
-                      className="transition hover:text-alma-gold"
-                    >
+                    <a href={link.href} className="transition hover:text-alma-gold">
                       {link.label}
                     </a>
                   ) : (
-                    <Link
-                      href={link.href}
-                      className="transition hover:text-alma-gold"
-                    >
+                    <Link href={link.href} className="transition hover:text-alma-gold">
                       {link.label}
                     </Link>
                   )}
