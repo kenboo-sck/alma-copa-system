@@ -6,6 +6,7 @@ export const collections = {
   participantCategoryEntries: "participantCategoryEntries",
   payments: "payments",
   emailLogs: "emailLogs",
+  inquiries: "inquiries",
   adminUsers: "adminUsers",
   auditLogs: "auditLogs",
   systemSettings: "systemSettings",

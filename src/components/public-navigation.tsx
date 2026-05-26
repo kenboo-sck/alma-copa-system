@@ -10,6 +10,7 @@ const navLinks = [
   { label: "大会一覧", href: "/events" },
   { label: "ENTRY", href: "/events" },
   { label: "ABOUT", href: "/#howto" },
+  { label: "CONTACT", href: "/contact" },
 ] as const;
 
 function getEventId(pathname: string) {
@@ -41,6 +42,8 @@ function getBreadcrumbs(pathname: string) {
     crumbs.push({ label: "確認", href: pathname });
   } else if (pathname === "/payment/success" || pathname === "/entry/success") {
     crumbs.push({ label: "受付完了", href: pathname });
+  } else if (pathname === "/contact") {
+    crumbs.push({ label: "お問い合わせ", href: pathname });
   } else if (pathname === "/law" || pathname.startsWith("/legal")) {
     crumbs.push({ label: "LEGAL", href: pathname });
   } else if (pathname.startsWith("/payment") || pathname.startsWith("/entry/")) {

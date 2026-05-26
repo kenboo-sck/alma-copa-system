@@ -10,7 +10,7 @@ const footerLinks: Array<{
   { label: "特定商取引法に基づく表記", href: "/law" },
   { label: "プライバシーポリシー", href: "/legal/privacy" },
   { label: "利用規約", href: "/legal/terms" },
-  { label: "お問い合わせ", href: "mailto:info@alma-copa.jp", external: true },
+  { label: "お問い合わせ", href: "/contact" },
 ] as const;
 
 function getBuildVersion() {
