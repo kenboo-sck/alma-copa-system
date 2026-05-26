@@ -7,7 +7,11 @@ import type { getPublicFirestore } from "@/lib/firebase/public-firestore";
 
 export type MailLogStatus = "sent" | "failed";
 export type MailLogRecipientType = "user" | "admin";
-export type MailLogType = "entry_completed" | "manual_individual" | "manual_bulk";
+export type MailLogType =
+  | "entry_completed"
+  | "manual_individual"
+  | "manual_bulk"
+  | "inquiry_reply";
 
 export type MailLogInput = {
   entryId: string | null;

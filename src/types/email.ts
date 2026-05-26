@@ -1,6 +1,10 @@
 export type EmailStatus = "sent" | "failed";
 export type EmailRecipientType = "user" | "admin";
-export type EmailMailType = "entry_completed" | "manual_individual" | "manual_bulk";
+export type EmailMailType =
+  | "entry_completed"
+  | "manual_individual"
+  | "manual_bulk"
+  | "inquiry_reply";
 
 export type EmailLogDocument = {
   logId: string;

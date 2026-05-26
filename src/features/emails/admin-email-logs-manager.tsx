@@ -10,7 +10,7 @@ import { collections } from "@/lib/firebase/collections";
 import type { EntryType } from "@/types/entry";
 
 type MailLogStatus = "sent" | "failed";
-type MailType = "entry_completed" | "manual_individual" | "manual_bulk";
+type MailType = "entry_completed" | "manual_individual" | "manual_bulk" | "inquiry_reply";
 type PaymentStatus = "pending" | "paid" | "failed";
 
 type MailLog = {
@@ -50,6 +50,7 @@ const mailTypeLabels: Record<MailType, string> = {
   entry_completed: "エントリー完了",
   manual_individual: "個別送信",
   manual_bulk: "一括メール",
+  inquiry_reply: "問い合わせ返信",
 };
 
 const statusLabels: Record<MailLogStatus, string> = {
@@ -80,6 +81,10 @@ function toMailStatus(value: unknown): MailLogStatus {
 
 function toMailType(value: unknown): MailType {
   if (value === "manual_individual" || value === "manual_bulk") {
+    return value;
+  }
+
+  if (value === "inquiry_reply") {
     return value;
   }
 

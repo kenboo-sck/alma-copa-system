@@ -168,3 +168,31 @@ export async function createFirestoreDocumentWithAuth(
     throw new Error(`Firestore REST create failed: ${response.status} ${body}`);
   }
 }
+
+export async function updateFirestoreDocumentWithAuth(
+  path: string,
+  data: Record<string, unknown>,
+  idToken: string,
+) {
+  const url = new URL(`${getFirestoreBaseUrl()}/${encodeDocumentPath(path)}`);
+
+  for (const key of Object.keys(data)) {
+    url.searchParams.append("updateMask.fieldPaths", key);
+  }
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fields: encodeFirestoreFields(data),
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Firestore REST update failed: ${response.status} ${body}`);
+  }
+}

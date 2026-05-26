@@ -403,10 +403,45 @@ service cloud.firestore {
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           "status",
-          "updatedAt"
+          "updatedAt",
+          "replyCount",
+          "lastReplyAt",
+          "lastReplySubject",
+          "lastReplyBodyPreview",
+          "lastReplyRecipientEmail",
+          "lastReplyByUid",
+          "lastReplyByEmail"
         ])
         && request.resource.data.status in ["unhandled", "in_progress", "resolved"]
-        && request.resource.data.updatedAt is timestamp;
+        && request.resource.data.updatedAt is timestamp
+        && (
+          !request.resource.data.keys().hasAny(["replyCount"])
+          || request.resource.data.replyCount is number
+        )
+        && (
+          !request.resource.data.keys().hasAny(["lastReplyAt"])
+          || request.resource.data.lastReplyAt is timestamp
+        )
+        && (
+          !request.resource.data.keys().hasAny(["lastReplySubject"])
+          || request.resource.data.lastReplySubject is string
+        )
+        && (
+          !request.resource.data.keys().hasAny(["lastReplyBodyPreview"])
+          || request.resource.data.lastReplyBodyPreview is string
+        )
+        && (
+          !request.resource.data.keys().hasAny(["lastReplyRecipientEmail"])
+          || request.resource.data.lastReplyRecipientEmail is string
+        )
+        && (
+          !request.resource.data.keys().hasAny(["lastReplyByUid"])
+          || request.resource.data.lastReplyByUid is string
+        )
+        && (
+          !request.resource.data.keys().hasAny(["lastReplyByEmail"])
+          || request.resource.data.lastReplyByEmail is string
+        );
       allow delete: if isAdmin();
     }
 

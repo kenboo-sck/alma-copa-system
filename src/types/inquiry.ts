@@ -14,4 +14,11 @@ export type InquiryDocument = {
   emailError: string | null;
   createdAt: Date;
   updatedAt: Date;
+  replyCount?: number;
+  lastReplyAt?: Date | null;
+  lastReplySubject?: string;
+  lastReplyBodyPreview?: string;
+  lastReplyRecipientEmail?: string;
+  lastReplyByUid?: string;
+  lastReplyByEmail?: string;
 };

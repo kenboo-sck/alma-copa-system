@@ -11,8 +11,12 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
-import { db } from "@/lib/firebase/client";
+import { auth, db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import {
+  inquiryReplySubject,
+  inquiryReplyTemplate,
+} from "@/lib/inquiries/reply-template";
 import type { InquiryStatus, InquiryType } from "@/types/inquiry";
 
 type AdminInquiry = {
@@ -28,6 +32,13 @@ type AdminInquiry = {
   emailError: string;
   createdAt: Date | null;
   updatedAt: Date | null;
+  replyCount: number;
+  lastReplyAt: Date | null;
+  lastReplySubject: string;
+  lastReplyBodyPreview: string;
+  lastReplyRecipientEmail: string;
+  lastReplyByUid: string;
+  lastReplyByEmail: string;
 };
 
 type InquiryStatusFilter = "all" | InquiryStatus;
@@ -113,6 +124,12 @@ export function AdminInquiriesManager() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [replySubject, setReplySubject] = useState(inquiryReplySubject);
+  const [replyBody, setReplyBody] = useState(inquiryReplyTemplate());
+  const [replyNextStatus, setReplyNextStatus] =
+    useState<Exclude<InquiryStatus, "unhandled">>("in_progress");
+  const [isReplySending, setIsReplySending] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -135,6 +152,25 @@ export function AdminInquiriesManager() {
               emailError: typeof data.emailError === "string" ? data.emailError : "",
               createdAt: toDate(data.createdAt),
               updatedAt: toDate(data.updatedAt),
+              replyCount:
+                typeof data.replyCount === "number" && Number.isFinite(data.replyCount)
+                  ? data.replyCount
+                  : 0,
+              lastReplyAt: toDate(data.lastReplyAt),
+              lastReplySubject:
+                typeof data.lastReplySubject === "string" ? data.lastReplySubject : "",
+              lastReplyBodyPreview:
+                typeof data.lastReplyBodyPreview === "string"
+                  ? data.lastReplyBodyPreview
+                  : "",
+              lastReplyRecipientEmail:
+                typeof data.lastReplyRecipientEmail === "string"
+                  ? data.lastReplyRecipientEmail
+                  : "",
+              lastReplyByUid:
+                typeof data.lastReplyByUid === "string" ? data.lastReplyByUid : "",
+              lastReplyByEmail:
+                typeof data.lastReplyByEmail === "string" ? data.lastReplyByEmail : "",
             };
           })
           .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
@@ -161,6 +197,19 @@ export function AdminInquiriesManager() {
     const timer = window.setTimeout(() => setToast(null), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!selectedInquiry) {
+      return;
+    }
+
+    setReplySubject(inquiryReplySubject);
+    setReplyBody(inquiryReplyTemplate());
+    setReplyNextStatus(
+      selectedInquiry.status === "resolved" ? "resolved" : "in_progress",
+    );
+    setReplyError(null);
+  }, [selectedInquiry?.id]);
 
   const visibleInquiries = useMemo(() => {
     const normalizedName = nameQuery.trim().toLowerCase();
@@ -200,6 +249,98 @@ export function AdminInquiriesManager() {
     } catch (caughtError) {
       console.error(caughtError);
       setError("対応状況の更新に失敗しました。");
+    }
+  }
+
+  async function handleReplySend() {
+    if (!selectedInquiry || isReplySending) {
+      return;
+    }
+
+    const subject = replySubject.trim();
+    const body = replyBody.trim();
+
+    if (!subject || !body) {
+      setReplyError("件名と本文を入力してください。");
+      return;
+    }
+
+    setReplyError(null);
+    setIsReplySending(true);
+
+    try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) {
+        throw new Error("管理者認証を確認できませんでした。");
+      }
+
+      const response = await fetch("/api/admin/inquiries/reply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          inquiryId: selectedInquiry.id,
+          recipientEmail: selectedInquiry.email,
+          subject,
+          body,
+          nextStatus: replyNextStatus,
+        }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        success?: boolean;
+        inquiryUpdated?: boolean;
+        mailLogged?: boolean;
+        updatedStatus?: InquiryStatus;
+        lastReplyAt?: string;
+        replyCount?: number;
+        subject?: string;
+        lastReplySubject?: string;
+        lastReplyBodyPreview?: string;
+        lastReplyRecipientEmail?: string;
+        lastReplyByUid?: string;
+        lastReplyByEmail?: string;
+      } | null;
+
+      if (!response.ok || data?.success !== true) {
+        throw new Error(data?.error ?? "問い合わせ返信メールの送信に失敗しました。");
+      }
+
+      setToast("問い合わせ返信メールを送信しました。");
+      setSelectedInquiry((current) =>
+        current?.id === selectedInquiry.id
+          ? {
+              ...current,
+              status: data.updatedStatus ?? replyNextStatus,
+              replyCount: data.replyCount ?? current.replyCount + 1,
+              lastReplyAt: data.lastReplyAt ? new Date(data.lastReplyAt) : new Date(),
+              lastReplySubject: data.lastReplySubject ?? subject,
+              lastReplyBodyPreview:
+                data.lastReplyBodyPreview ??
+                body.replace(/\s+/g, " ").trim().slice(0, 160),
+              lastReplyRecipientEmail:
+                data.lastReplyRecipientEmail ?? selectedInquiry.email,
+              lastReplyByUid: data.lastReplyByUid ?? current.lastReplyByUid,
+              lastReplyByEmail: data.lastReplyByEmail ?? current.lastReplyByEmail,
+            }
+          : current,
+      );
+      setReplySubject(inquiryReplySubject);
+      setReplyBody(inquiryReplyTemplate());
+      setReplyNextStatus(
+        data.updatedStatus === "resolved" ? "resolved" : "in_progress",
+      );
+    } catch (caughtError) {
+      console.error(caughtError);
+      setReplyError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "問い合わせ返信メールの送信に失敗しました。",
+      );
+    } finally {
+      setIsReplySending(false);
     }
   }
 
@@ -464,6 +605,9 @@ export function AdminInquiriesManager() {
               <span className="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-semibold text-zinc-300">
                 種別: {inquiryTypeLabels[selectedInquiry.inquiryType]}
               </span>
+              <span className="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-semibold text-zinc-300">
+                返信済み: {selectedInquiry.replyCount > 0 ? "はい" : "いいえ"}
+              </span>
             </div>
 
             <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
@@ -490,6 +634,12 @@ export function AdminInquiriesManager() {
                   ユーザー: {selectedInquiry.userNotified ? "送信済み" : "未送信"}
                 </dd>
               </div>
+              <div>
+                <dt className="text-xs text-zinc-500">最終返信日時</dt>
+                <dd className="mt-1 text-zinc-200">
+                  {formatDateTime(selectedInquiry.lastReplyAt)}
+                </dd>
+              </div>
               <label className="space-y-2 sm:col-span-2">
                 <span className="text-xs font-semibold text-zinc-400">対応状況</span>
                 <select
@@ -514,6 +664,77 @@ export function AdminInquiriesManager() {
                 {selectedInquiry.emailError}
               </div>
             ) : null}
+
+            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-alma-gold">返信</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    この返信内容はメール履歴へ保存されます。
+                  </p>
+                </div>
+                <label className="space-y-2 sm:w-56">
+                  <span className="text-xs font-semibold text-zinc-400">返信後の対応状況</span>
+                  <select
+                    value={replyNextStatus}
+                    onChange={(event) =>
+                      setReplyNextStatus(
+                        event.target.value as Exclude<InquiryStatus, "unhandled">,
+                      )
+                    }
+                    className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+                  >
+                    <option value="in_progress">対応中にする</option>
+                    <option value="resolved">対応済みにする</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-4">
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-zinc-400">宛先メールアドレス</span>
+                  <input
+                    value={selectedInquiry.email}
+                    readOnly
+                    className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-zinc-300 outline-none"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-zinc-400">件名</span>
+                  <input
+                    value={replySubject}
+                    onChange={(event) => setReplySubject(event.target.value)}
+                    className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+                  />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-xs font-semibold text-zinc-400">本文</span>
+                  <textarea
+                    value={replyBody}
+                    onChange={(event) => setReplyBody(event.target.value)}
+                    rows={12}
+                    className="w-full rounded-md border border-white/10 bg-black px-3 py-3 text-sm leading-6 text-white outline-none focus:border-alma-gold"
+                  />
+                </label>
+              </div>
+
+              {replyError ? (
+                <div className="mt-4 rounded-md border border-red-800/70 bg-red-950 px-4 py-3 text-sm text-red-100">
+                  {replyError}
+                </div>
+              ) : null}
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleReplySend()}
+                  disabled={isReplySending}
+                  className="min-h-11 rounded-md bg-alma-gold px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isReplySending ? "送信中..." : "返信を送信"}
+                </button>
+              </div>
+            </div>
 
             <div className="mt-5 rounded-md border border-white/10 bg-black px-4 py-3">
               <p className="text-xs font-semibold text-zinc-500">問い合わせ本文</p>
