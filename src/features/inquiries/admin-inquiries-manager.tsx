@@ -1,6 +1,13 @@
 "use client";
 
-import { collection, doc, onSnapshot, serverTimestamp, Timestamp, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  Timestamp,
+  updateDoc,
+} from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -49,9 +56,11 @@ function toDate(value: unknown): Date | null {
   if (value instanceof Timestamp) {
     return value.toDate();
   }
+
   if (value instanceof Date) {
     return value;
   }
+
   return null;
 }
 
@@ -59,6 +68,7 @@ function toInquiryType(value: unknown): InquiryType {
   if (value === "entry" || value === "payment" || value === "event" || value === "other") {
     return value;
   }
+
   return "";
 }
 
@@ -66,6 +76,7 @@ function toInquiryStatus(value: unknown): InquiryStatus {
   if (value === "in_progress" || value === "resolved") {
     return value;
   }
+
   return "unhandled";
 }
 
@@ -73,6 +84,7 @@ function formatDateTime(value: Date | null) {
   if (!value) {
     return "-";
   }
+
   return new Intl.DateTimeFormat("ja-JP", {
     year: "numeric",
     month: "2-digit",
@@ -82,11 +94,22 @@ function formatDateTime(value: Date | null) {
   }).format(value);
 }
 
+function buildExcerpt(message: string) {
+  const normalized = message.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return "-";
+  }
+
+  return normalized.length > 90 ? `${normalized.slice(0, 90)}…` : normalized;
+}
+
 export function AdminInquiriesManager() {
   const [inquiries, setInquiries] = useState<AdminInquiry[]>([]);
   const [selectedInquiry, setSelectedInquiry] = useState<AdminInquiry | null>(null);
   const [statusFilter, setStatusFilter] = useState<InquiryStatusFilter>("all");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [nameQuery, setNameQuery] = useState("");
+  const [emailQuery, setEmailQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -134,34 +157,29 @@ export function AdminInquiriesManager() {
     if (!toast) {
       return;
     }
+
     const timer = window.setTimeout(() => setToast(null), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
   const visibleInquiries = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const normalizedName = nameQuery.trim().toLowerCase();
+    const normalizedEmail = emailQuery.trim().toLowerCase();
 
     return inquiries.filter((inquiry) => {
       const matchesStatus = statusFilter === "all" || inquiry.status === statusFilter;
-      const matchesSearch =
-        !query ||
-        [
-          inquiry.name,
-          inquiry.email,
-          inquiry.phone,
-          inquiry.message,
-          inquiryTypeLabels[inquiry.inquiryType],
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(query);
+      const matchesName =
+        !normalizedName || inquiry.name.toLowerCase().includes(normalizedName);
+      const matchesEmail =
+        !normalizedEmail || inquiry.email.toLowerCase().includes(normalizedEmail);
 
-      return matchesStatus && matchesSearch;
+      return matchesStatus && matchesName && matchesEmail;
     });
-  }, [inquiries, searchQuery, statusFilter]);
+  }, [emailQuery, inquiries, nameQuery, statusFilter]);
 
   const summary = useMemo(
     () => ({
+      total: inquiries.length,
       unhandled: inquiries.filter((item) => item.status === "unhandled").length,
       inProgress: inquiries.filter((item) => item.status === "in_progress").length,
       resolved: inquiries.filter((item) => item.status === "resolved").length,
@@ -206,7 +224,11 @@ export function AdminInquiriesManager() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+          <p className="text-sm text-zinc-400">合計</p>
+          <p className="mt-2 text-2xl font-bold text-white">{summary.total}</p>
+        </div>
         <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
           <p className="text-sm text-zinc-400">未対応</p>
           <p className="mt-2 text-2xl font-bold text-white">{summary.unhandled}</p>
@@ -222,13 +244,22 @@ export function AdminInquiriesManager() {
       </div>
 
       <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_180px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_1fr_180px]">
           <label className="space-y-2">
-            <span className="text-xs font-semibold text-zinc-400">検索</span>
+            <span className="text-xs font-semibold text-zinc-400">名前検索</span>
             <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="名前、メール、本文で検索"
+              value={nameQuery}
+              onChange={(event) => setNameQuery(event.target.value)}
+              placeholder="名前で絞り込み"
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            />
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">メール検索</span>
+            <input
+              value={emailQuery}
+              onChange={(event) => setEmailQuery(event.target.value)}
+              placeholder="メールで絞り込み"
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             />
           </label>
@@ -260,54 +291,146 @@ export function AdminInquiriesManager() {
             条件に一致するお問い合わせはありません。
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="border-b border-white/10 bg-black/50 text-xs text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">日時</th>
-                  <th className="px-4 py-3 font-semibold">お名前</th>
-                  <th className="px-4 py-3 font-semibold">種別</th>
-                  <th className="px-4 py-3 font-semibold">内容</th>
-                  <th className="px-4 py-3 font-semibold">状況</th>
-                  <th className="px-4 py-3 font-semibold">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleInquiries.map((inquiry) => (
-                  <tr key={inquiry.id} className="border-b border-white/5 align-top">
-                    <td className="px-4 py-4 text-zinc-300">
-                      {formatDateTime(inquiry.createdAt)}
-                    </td>
-                    <td className="px-4 py-4">
-                      <p className="font-semibold text-white">{inquiry.name}</p>
-                      <p className="mt-1 text-xs text-zinc-500">{inquiry.email}</p>
-                    </td>
-                    <td className="px-4 py-4 text-zinc-300">
-                      {inquiryTypeLabels[inquiry.inquiryType]}
-                    </td>
-                    <td className="px-4 py-4 text-zinc-300">
-                      <p className="line-clamp-2 max-w-md">{inquiry.message}</p>
-                    </td>
-                    <td className="px-4 py-4">
-                      <StatusBadge
-                        label={statusLabels[inquiry.status]}
-                        tone={statusTones[inquiry.status]}
-                      />
-                    </td>
-                    <td className="px-4 py-4">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedInquiry(inquiry)}
-                        className="rounded-md border border-white/10 px-3 py-2 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
-                      >
-                        詳細
-                      </button>
-                    </td>
+          <>
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[1180px] text-left text-sm">
+                <thead className="border-b border-white/10 bg-black/50 text-xs text-zinc-400">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">日時</th>
+                    <th className="px-4 py-3 font-semibold">名前</th>
+                    <th className="px-4 py-3 font-semibold">メール</th>
+                    <th className="px-4 py-3 font-semibold">電話番号</th>
+                    <th className="px-4 py-3 font-semibold">問い合わせ種別</th>
+                    <th className="px-4 py-3 font-semibold">問い合わせ内容</th>
+                    <th className="px-4 py-3 font-semibold">対応状況</th>
+                    <th className="px-4 py-3 font-semibold">操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {visibleInquiries.map((inquiry) => (
+                    <tr key={inquiry.id} className="border-b border-white/5 align-top">
+                      <td className="px-4 py-4 text-zinc-300">
+                        {formatDateTime(inquiry.createdAt)}
+                      </td>
+                      <td className="px-4 py-4">
+                        <p className="font-semibold text-white">{inquiry.name}</p>
+                      </td>
+                      <td className="px-4 py-4 text-zinc-300">{inquiry.email}</td>
+                      <td className="px-4 py-4 text-zinc-300">
+                        {inquiry.phone || "-"}
+                      </td>
+                      <td className="px-4 py-4 text-zinc-300">
+                        {inquiryTypeLabels[inquiry.inquiryType]}
+                      </td>
+                      <td className="px-4 py-4 text-zinc-300">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInquiry(inquiry)}
+                          className="block max-w-[420px] text-left hover:text-alma-gold"
+                        >
+                          <span className="line-clamp-2">{buildExcerpt(inquiry.message)}</span>
+                        </button>
+                      </td>
+                      <td className="px-4 py-4">
+                        <select
+                          value={inquiry.status}
+                          onChange={(event) =>
+                            void updateStatus(
+                              inquiry,
+                              event.target.value as InquiryStatus,
+                            )
+                          }
+                          className="h-10 rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+                        >
+                          <option value="unhandled">未対応</option>
+                          <option value="in_progress">対応中</option>
+                          <option value="resolved">対応済み</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-4">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInquiry(inquiry)}
+                          className="rounded-md border border-white/10 px-3 py-2 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                        >
+                          詳細
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-3 p-3 lg:hidden">
+              {visibleInquiries.map((inquiry) => (
+                <article
+                  key={inquiry.id}
+                  className="rounded-lg border border-white/10 bg-black/40 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs text-zinc-500">
+                        {formatDateTime(inquiry.createdAt)}
+                      </p>
+                      <h2 className="mt-1 text-base font-semibold text-white">
+                        {inquiry.name}
+                      </h2>
+                      <p className="mt-1 break-all text-sm text-zinc-400">
+                        {inquiry.email}
+                      </p>
+                    </div>
+                    <StatusBadge
+                      label={statusLabels[inquiry.status]}
+                      tone={statusTones[inquiry.status]}
+                    />
+                  </div>
+
+                  <dl className="mt-4 grid gap-3 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-zinc-500">電話番号</dt>
+                      <dd className="text-right text-zinc-200">
+                        {inquiry.phone || "-"}
+                      </dd>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <dt className="text-zinc-500">種別</dt>
+                      <dd className="text-right text-zinc-200">
+                        {inquiryTypeLabels[inquiry.inquiryType]}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-zinc-500">問い合わせ内容</dt>
+                      <dd className="mt-1 line-clamp-3 whitespace-pre-wrap text-zinc-200">
+                        {buildExcerpt(inquiry.message)}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+                    <select
+                      value={inquiry.status}
+                      onChange={(event) =>
+                        void updateStatus(inquiry, event.target.value as InquiryStatus)
+                      }
+                      className="h-11 rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+                    >
+                      <option value="unhandled">未対応</option>
+                      <option value="in_progress">対応中</option>
+                      <option value="resolved">対応済み</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedInquiry(inquiry)}
+                      className="h-11 rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                    >
+                      詳細
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -320,7 +443,7 @@ export function AdminInquiriesManager() {
                 <h2 className="mt-2 text-lg font-bold text-white">
                   {selectedInquiry.name}
                 </h2>
-                <p className="mt-1 break-all text-sm text-zinc-400">
+                <p className="mt-1 text-sm text-zinc-400">
                   {selectedInquiry.email}
                 </p>
               </div>
@@ -333,25 +456,41 @@ export function AdminInquiriesManager() {
               </button>
             </div>
 
+            <div className="mt-4 flex flex-wrap gap-2">
+              <StatusBadge
+                label={statusLabels[selectedInquiry.status]}
+                tone={statusTones[selectedInquiry.status]}
+              />
+              <span className="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs font-semibold text-zinc-300">
+                種別: {inquiryTypeLabels[selectedInquiry.inquiryType]}
+              </span>
+            </div>
+
             <dl className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-zinc-500">送信日時</dt>
+                <dd className="mt-1 text-zinc-200">
+                  {formatDateTime(selectedInquiry.createdAt)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-zinc-500">更新日時</dt>
+                <dd className="mt-1 text-zinc-200">
+                  {formatDateTime(selectedInquiry.updatedAt)}
+                </dd>
+              </div>
               <div>
                 <dt className="text-xs text-zinc-500">電話番号</dt>
                 <dd className="mt-1 text-zinc-200">{selectedInquiry.phone || "-"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-zinc-500">種別</dt>
-                <dd className="mt-1 text-zinc-200">
-                  {inquiryTypeLabels[selectedInquiry.inquiryType]}
-                </dd>
-              </div>
-              <div>
                 <dt className="text-xs text-zinc-500">通知メール</dt>
                 <dd className="mt-1 text-zinc-200">
-                  管理者: {selectedInquiry.adminNotified ? "送信済み" : "未送信"} /
+                  管理者: {selectedInquiry.adminNotified ? "送信済み" : "未送信"} /{" "}
                   ユーザー: {selectedInquiry.userNotified ? "送信済み" : "未送信"}
                 </dd>
               </div>
-              <label className="space-y-2">
+              <label className="space-y-2 sm:col-span-2">
                 <span className="text-xs font-semibold text-zinc-400">対応状況</span>
                 <select
                   value={selectedInquiry.status}
@@ -377,7 +516,7 @@ export function AdminInquiriesManager() {
             ) : null}
 
             <div className="mt-5 rounded-md border border-white/10 bg-black px-4 py-3">
-              <p className="text-xs font-semibold text-zinc-500">お問い合わせ内容</p>
+              <p className="text-xs font-semibold text-zinc-500">問い合わせ本文</p>
               <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-zinc-100">
                 {selectedInquiry.message}
               </p>
