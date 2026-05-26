@@ -12,6 +12,56 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.isActive == true;
     }
 
+    function publicInquiryCreateAllowed(inquiryId) {
+      let data = request.resource.data;
+
+      return data.keys().hasOnly([
+          "inquiryId",
+          "name",
+          "email",
+          "phone",
+          "inquiryType",
+          "message",
+          "status",
+          "adminNotified",
+          "userNotified",
+          "emailError",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.keys().hasAll([
+          "inquiryId",
+          "name",
+          "email",
+          "inquiryType",
+          "message",
+          "status",
+          "adminNotified",
+          "userNotified",
+          "emailError",
+          "createdAt",
+          "updatedAt"
+        ])
+        && data.inquiryId == inquiryId
+        && data.name is string
+        && data.name.size() >= 1
+        && data.name.size() <= 80
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 160
+        && (data.phone == null || (data.phone is string && data.phone.size() <= 40))
+        && data.inquiryType in ["entry", "payment", "event", "other", ""]
+        && data.message is string
+        && data.message.size() >= 1
+        && data.message.size() <= 5000
+        && data.status == "unhandled"
+        && data.adminNotified == false
+        && data.userNotified == false
+        && data.emailError == null
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
     function isPublishedEvent(eventId) {
       return exists(/databases/$(database)/documents/events/$(eventId))
         && get(/databases/$(database)/documents/events/$(eventId)).data.status == "published"
@@ -361,7 +411,7 @@ service cloud.firestore {
 
     match /inquiries/{inquiryId} {
       allow read: if isAdmin();
-      allow create: if false;
+      allow create: if publicInquiryCreateAllowed(inquiryId);
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           "status",

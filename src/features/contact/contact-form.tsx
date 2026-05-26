@@ -1,7 +1,11 @@
 "use client";
 
+import { collection, doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useState } from "react";
 import type { FormEvent } from "react";
+
+import { db } from "@/lib/firebase/client";
+import { collections } from "@/lib/firebase/collections";
 
 type ContactFormValues = {
   name: string;
@@ -27,6 +31,16 @@ const initialValues: ContactFormValues = {
   message: "",
 };
 
+const contactSubmitStorageKey = "alma-copa-contact-last-submit-at";
+const contactSubmitIntervalMs = 30_000;
+const maxLengths: Record<keyof ContactFormValues, number> = {
+  name: 80,
+  email: 160,
+  phone: 40,
+  inquiryType: 20,
+  message: 5000,
+};
+
 export function ContactForm() {
   const [values, setValues] = useState<ContactFormValues>(initialValues);
   const [errors, setErrors] = useState<Partial<Record<keyof ContactFormValues, string>>>(
@@ -44,21 +58,59 @@ export function ContactForm() {
 
   function validate() {
     const nextErrors: Partial<Record<keyof ContactFormValues, string>> = {};
+    const trimmedValues = {
+      name: values.name.trim(),
+      email: values.email.trim(),
+      phone: values.phone.trim(),
+      inquiryType: values.inquiryType,
+      message: values.message.trim(),
+    };
 
-    if (!values.name.trim()) {
+    if (!trimmedValues.name) {
       nextErrors.name = "お名前を入力してください。";
+    } else if (trimmedValues.name.length > maxLengths.name) {
+      nextErrors.name = `${maxLengths.name}文字以内で入力してください。`;
     }
-    if (!values.email.trim()) {
+    if (!trimmedValues.email) {
       nextErrors.email = "メールアドレスを入力してください。";
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) {
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValues.email)) {
       nextErrors.email = "メールアドレスを正しく入力してください。";
+    } else if (trimmedValues.email.length > maxLengths.email) {
+      nextErrors.email = `${maxLengths.email}文字以内で入力してください。`;
     }
-    if (!values.message.trim()) {
+    if (trimmedValues.phone.length > maxLengths.phone) {
+      nextErrors.phone = `${maxLengths.phone}文字以内で入力してください。`;
+    }
+    if (!trimmedValues.message) {
       nextErrors.message = "お問い合わせ内容を入力してください。";
+    } else if (trimmedValues.message.length > maxLengths.message) {
+      nextErrors.message = `${maxLengths.message}文字以内で入力してください。`;
     }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
+  }
+
+  function isSubmitTooSoon() {
+    try {
+      const lastSubmitAt = Number(
+        window.localStorage.getItem(contactSubmitStorageKey) ?? "0",
+      );
+
+      return Number.isFinite(lastSubmitAt)
+        && Date.now() - lastSubmitAt < contactSubmitIntervalMs;
+    } catch (error) {
+      console.error("Contact submit interval check failed", error);
+      return false;
+    }
+  }
+
+  function rememberSubmitTime() {
+    try {
+      window.localStorage.setItem(contactSubmitStorageKey, String(Date.now()));
+    } catch (error) {
+      console.error("Contact submit interval save failed", error);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -73,25 +125,69 @@ export function ContactForm() {
     setSubmitWarning(null);
 
     try {
-      const response = await fetch("/api/contact", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(values),
-      });
-      const data = (await response.json().catch(() => null)) as {
-        error?: string;
-        emailWarning?: string;
-        success?: boolean;
-      } | null;
+      if (isSubmitTooSoon()) {
+        throw new Error(
+          "短時間に連続して送信されています。少し時間をおいて再度お試しください。",
+        );
+      }
 
-      if (!response.ok || data?.success !== true) {
-        throw new Error(data?.error ?? "お問い合わせの送信に失敗しました。");
+      const inquiryRef = doc(collection(db, collections.inquiries));
+      const normalizedValues = {
+        name: values.name.trim(),
+        email: values.email.trim(),
+        phone: values.phone.trim(),
+        inquiryType: values.inquiryType,
+        message: values.message.trim(),
+      };
+
+      await setDoc(inquiryRef, {
+        inquiryId: inquiryRef.id,
+        ...normalizedValues,
+        phone: normalizedValues.phone || null,
+        status: "unhandled",
+        adminNotified: false,
+        userNotified: false,
+        emailError: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      rememberSubmitTime();
+
+      try {
+        const response = await fetch("/api/contact", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inquiryId: inquiryRef.id,
+            ...normalizedValues,
+          }),
+        });
+        const data = (await response.json().catch(() => null)) as {
+          error?: string;
+          emailWarning?: string;
+          success?: boolean;
+        } | null;
+
+        if (!response.ok || data?.success !== true) {
+          console.error("Contact notification failed", data);
+          setSubmitWarning(
+            data?.error ??
+              "お問い合わせは受け付けましたが、通知メールの送信に失敗した可能性があります。",
+          );
+        } else {
+          setSubmitWarning(data?.emailWarning ?? null);
+        }
+      } catch (error) {
+        console.error("Contact notification request failed", error);
+        setSubmitWarning(
+          "お問い合わせは受け付けましたが、通知メールの送信に失敗した可能性があります。",
+        );
       }
 
       setValues(initialValues);
-      setSubmitWarning(data?.emailWarning ?? null);
       setIsSubmitted(true);
     } catch (error) {
       console.error(error);
@@ -176,6 +272,7 @@ export function ContactForm() {
             autoComplete="tel"
             className="h-12 w-full rounded-md border border-white/10 bg-black px-3 text-base text-white outline-none focus:border-alma-gold"
           />
+          {errors.phone ? <p className="text-sm text-red-300">{errors.phone}</p> : null}
         </label>
 
         <label className="space-y-2">

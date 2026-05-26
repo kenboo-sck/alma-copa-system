@@ -1,12 +1,6 @@
-import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { z } from "zod";
 
 import { emailService } from "@/lib/email";
-import { collections } from "@/lib/firebase/collections";
-import {
-  getAdminFirestore,
-  getFirebaseAdminConfigStatus,
-} from "@/lib/firebase/admin";
 import type { InquiryType } from "@/types/inquiry";
 
 export const runtime = "nodejs";
@@ -19,6 +13,7 @@ const inquiryTypeLabels: Record<Exclude<InquiryType, "">, string> = {
 };
 
 const contactSchema = z.object({
+  inquiryId: z.string().trim().min(1).max(120).optional(),
   name: z.string().trim().min(1, "お名前を入力してください。").max(80),
   email: z.email("メールアドレスを正しく入力してください。").max(160),
   phone: z.string().trim().max(40).optional().default(""),
@@ -72,44 +67,6 @@ export async function POST(request: Request) {
     );
   }
 
-  let inquiryRef: DocumentReference;
-
-  try {
-    const db = getAdminFirestore();
-    inquiryRef = db.collection(collections.inquiries).doc();
-
-    await inquiryRef.set({
-      inquiryId: inquiryRef.id,
-      name: parsed.data.name,
-      email: parsed.data.email,
-      phone: parsed.data.phone || null,
-      inquiryType: parsed.data.inquiryType,
-      message: parsed.data.message,
-      status: "unhandled",
-      adminNotified: false,
-      userNotified: false,
-      emailError: null,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  } catch (error) {
-    const adminStatus = getFirebaseAdminConfigStatus();
-    console.error("Contact inquiry Firestore create failed", {
-      adminStatus,
-      error,
-    });
-
-    return Response.json(
-      {
-        success: false,
-        ok: false,
-        code: "CONTACT_INQUIRY_SAVE_FAILED",
-        error: "お問い合わせの保存に失敗しました。時間をおいて再度お試しください。",
-      },
-      { status: 500 },
-    );
-  }
-
   let adminNotified = false;
   let userNotified = false;
   let emailError: string | null = null;
@@ -133,7 +90,7 @@ export async function POST(request: Request) {
       userNotified = true;
     } catch (error) {
       console.error("Contact inquiry email failed", {
-        inquiryId: inquiryRef.id,
+        inquiryId: parsed.data.inquiryId,
         adminNotified,
         userNotified,
         error,
@@ -144,35 +101,14 @@ export async function POST(request: Request) {
     emailError = "EMAIL_SERVICE_NOT_CONFIGURED";
   }
 
-  let notificationStatusSaved = true;
-
-  try {
-    await inquiryRef.update({
-      adminNotified,
-      userNotified,
-      emailError,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  } catch (error) {
-    notificationStatusSaved = false;
-    console.error("Contact inquiry notification status update failed", {
-      inquiryId: inquiryRef.id,
-      adminNotified,
-      userNotified,
-      emailError,
-      error,
-    });
-  }
-
   if (!adminNotified || !userNotified) {
     return Response.json({
       success: true,
       ok: true,
       inquirySaved: true,
-      inquiryId: inquiryRef.id,
+      inquiryId: parsed.data.inquiryId,
       adminNotified,
       userNotified,
-      notificationStatusSaved,
       emailError,
       emailWarning:
         "お問い合わせは受け付けましたが、控えメールの送信に失敗した可能性があります。",
@@ -183,10 +119,9 @@ export async function POST(request: Request) {
     success: true,
     ok: true,
     inquirySaved: true,
-    inquiryId: inquiryRef.id,
+    inquiryId: parsed.data.inquiryId,
     adminNotified,
     userNotified,
-    notificationStatusSaved,
     emailError,
   });
 }
