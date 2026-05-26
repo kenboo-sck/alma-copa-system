@@ -30,36 +30,24 @@ service cloud.firestore {
           "updatedAt"
         ])
         && data.keys().hasAll([
-          "inquiryId",
           "name",
           "email",
-          "inquiryType",
           "message",
-          "status",
-          "adminNotified",
-          "userNotified",
-          "emailError",
           "createdAt",
-          "updatedAt"
         ])
-        && data.inquiryId == inquiryId
         && data.name is string
         && data.name.size() >= 1
-        && data.name.size() <= 80
+        && data.name.size() <= 100
         && data.email is string
         && data.email.size() >= 3
-        && data.email.size() <= 160
+        && data.email.size() <= 200
         && (data.phone == null || (data.phone is string && data.phone.size() <= 40))
         && data.inquiryType in ["entry", "payment", "event", "other", ""]
         && data.message is string
         && data.message.size() >= 1
         && data.message.size() <= 5000
-        && data.status == "unhandled"
-        && data.adminNotified == false
-        && data.userNotified == false
-        && data.emailError == null
         && data.createdAt == request.time
-        && data.updatedAt == request.time;
+        && (!data.keys().hasAny(["updatedAt"]) || data.updatedAt == request.time);
     }
 
     function isPublishedEvent(eventId) {
