@@ -80,9 +80,10 @@ export function ContactForm() {
       });
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        success?: boolean;
       } | null;
 
-      if (!response.ok) {
+      if (!response.ok || data?.success !== true) {
         throw new Error(data?.error ?? "お問い合わせの送信に失敗しました。");
       }
 
@@ -103,9 +104,11 @@ export function ContactForm() {
   if (isSubmitted) {
     return (
       <div className="rounded-lg border border-emerald-700 bg-emerald-950/60 p-6">
-        <p className="text-lg font-bold text-white">お問い合わせを受け付けました。</p>
+        <p className="text-lg font-bold text-white">
+          お問い合わせを送信しました。
+        </p>
         <p className="mt-3 text-sm leading-6 text-emerald-100">
-          内容を確認のうえ、必要に応じて担当者よりご連絡いたします。
+          内容を確認のうえ、担当者よりご連絡いたします。
         </p>
         <button
           type="button"

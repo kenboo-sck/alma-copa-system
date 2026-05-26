@@ -393,13 +393,31 @@ service cloud.firestore {
         && (request.resource.data.emailError == null || request.resource.data.emailError is string)
         && request.resource.data.createdAt is timestamp
         && request.resource.data.updatedAt is timestamp;
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
-          "status",
-          "updatedAt"
-        ])
-        && request.resource.data.status in ["unhandled", "in_progress", "resolved"]
-        && request.resource.data.updatedAt is timestamp;
+      allow update: if (
+          isAdmin()
+          && (
+            request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              "status",
+              "updatedAt"
+            ])
+            && request.resource.data.status in ["unhandled", "in_progress", "resolved"]
+            && request.resource.data.updatedAt is timestamp
+          )
+        )
+        || (
+          resource.data.status == "unhandled"
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            "adminNotified",
+            "userNotified",
+            "emailError",
+            "updatedAt"
+          ])
+          && request.resource.data.adminNotified is bool
+          && request.resource.data.userNotified is bool
+          && (request.resource.data.emailError == null || request.resource.data.emailError is string)
+          && request.resource.data.updatedAt is timestamp
+        );
       allow delete: if isAdmin();
     }
 

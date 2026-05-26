@@ -1,4 +1,10 @@
-import { collection, doc, serverTimestamp, setDoc } from "firebase/firestore/lite";
+import {
+  collection,
+  doc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore/lite";
 import { z } from "zod";
 
 import { emailService } from "@/lib/email";
@@ -72,6 +78,37 @@ export async function POST(request: Request) {
   const db = getPublicFirestore();
   const inquiryRef = doc(collection(db, collections.inquiries));
 
+  try {
+    await setDoc(inquiryRef, {
+      inquiryId: inquiryRef.id,
+      name: parsed.data.name,
+      email: parsed.data.email,
+      phone: parsed.data.phone || null,
+      inquiryType: parsed.data.inquiryType,
+      message: parsed.data.message,
+      status: "unhandled",
+      adminNotified: false,
+      userNotified: false,
+      emailError: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error("Contact inquiry Firestore create failed", {
+      inquiryId: inquiryRef.id,
+      error,
+    });
+
+    return Response.json(
+      {
+        success: false,
+        ok: false,
+        error: "お問い合わせの保存に失敗しました。時間をおいて再度お試しください。",
+      },
+      { status: 500 },
+    );
+  }
+
   let adminNotified = false;
   let userNotified = false;
   let emailError: string | null = null;
@@ -96,6 +133,8 @@ export async function POST(request: Request) {
     } catch (error) {
       console.error("Contact inquiry email failed", {
         inquiryId: inquiryRef.id,
+        adminNotified,
+        userNotified,
         error,
       });
       emailError = error instanceof Error ? error.message : String(error);
@@ -104,26 +143,52 @@ export async function POST(request: Request) {
     emailError = "EMAIL_SERVICE_NOT_CONFIGURED";
   }
 
-  await setDoc(inquiryRef, {
-    inquiryId: inquiryRef.id,
-    name: parsed.data.name,
-    email: parsed.data.email,
-    phone: parsed.data.phone || null,
-    inquiryType: parsed.data.inquiryType,
-    message: parsed.data.message,
-    status: "unhandled",
-    adminNotified,
-    userNotified,
-    emailError,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+  let notificationStatusSaved = true;
+
+  try {
+    await updateDoc(inquiryRef, {
+      adminNotified,
+      userNotified,
+      emailError,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    notificationStatusSaved = false;
+    console.error("Contact inquiry notification status update failed", {
+      inquiryId: inquiryRef.id,
+      adminNotified,
+      userNotified,
+      emailError,
+      error,
+    });
+  }
+
+  if (!adminNotified || !userNotified) {
+    return Response.json(
+      {
+        success: false,
+        ok: false,
+        inquirySaved: true,
+        inquiryId: inquiryRef.id,
+        adminNotified,
+        userNotified,
+        notificationStatusSaved,
+        emailError,
+        error:
+          "お問い合わせは保存されましたが、通知メールの送信に失敗しました。時間をおいて再度お試しください。",
+      },
+      { status: 502 },
+    );
+  }
 
   return Response.json({
+    success: true,
     ok: true,
+    inquirySaved: true,
     inquiryId: inquiryRef.id,
     adminNotified,
     userNotified,
+    notificationStatusSaved,
     emailError,
   });
 }
