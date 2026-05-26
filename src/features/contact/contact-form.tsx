@@ -34,6 +34,7 @@ export function ContactForm() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitWarning, setSubmitWarning] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   function updateValue(key: keyof ContactFormValues, value: string) {
@@ -69,6 +70,7 @@ export function ContactForm() {
 
     setIsSubmitting(true);
     setSubmitError(null);
+    setSubmitWarning(null);
 
     try {
       const response = await fetch("/api/contact", {
@@ -80,6 +82,7 @@ export function ContactForm() {
       });
       const data = (await response.json().catch(() => null)) as {
         error?: string;
+        emailWarning?: string;
         success?: boolean;
       } | null;
 
@@ -88,6 +91,7 @@ export function ContactForm() {
       }
 
       setValues(initialValues);
+      setSubmitWarning(data?.emailWarning ?? null);
       setIsSubmitted(true);
     } catch (error) {
       console.error(error);
@@ -110,6 +114,11 @@ export function ContactForm() {
         <p className="mt-3 text-sm leading-6 text-emerald-100">
           内容を確認のうえ、担当者よりご連絡いたします。
         </p>
+        {submitWarning ? (
+          <p className="mt-3 rounded-md border border-amber-400/40 bg-amber-950/60 px-4 py-3 text-sm leading-6 text-amber-100">
+            {submitWarning}
+          </p>
+        ) : null}
         <button
           type="button"
           onClick={() => setIsSubmitted(false)}

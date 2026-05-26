@@ -361,63 +361,14 @@ service cloud.firestore {
 
     match /inquiries/{inquiryId} {
       allow read: if isAdmin();
-      allow create: if request.resource.data.keys().hasOnly([
-          "inquiryId",
-          "name",
-          "email",
-          "phone",
-          "inquiryType",
-          "message",
+      allow create: if false;
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           "status",
-          "adminNotified",
-          "userNotified",
-          "emailError",
-          "createdAt",
           "updatedAt"
         ])
-        && request.resource.data.inquiryId == inquiryId
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 80
-        && request.resource.data.email is string
-        && request.resource.data.email.size() > 0
-        && request.resource.data.email.size() <= 160
-        && (request.resource.data.phone == null || request.resource.data.phone is string)
-        && request.resource.data.inquiryType in ["", "entry", "payment", "event", "other"]
-        && request.resource.data.message is string
-        && request.resource.data.message.size() > 0
-        && request.resource.data.message.size() <= 5000
-        && request.resource.data.status == "unhandled"
-        && request.resource.data.adminNotified is bool
-        && request.resource.data.userNotified is bool
-        && (request.resource.data.emailError == null || request.resource.data.emailError is string)
-        && request.resource.data.createdAt is timestamp
+        && request.resource.data.status in ["unhandled", "in_progress", "resolved"]
         && request.resource.data.updatedAt is timestamp;
-      allow update: if (
-          isAdmin()
-          && (
-            request.resource.data.diff(resource.data).changedKeys().hasOnly([
-              "status",
-              "updatedAt"
-            ])
-            && request.resource.data.status in ["unhandled", "in_progress", "resolved"]
-            && request.resource.data.updatedAt is timestamp
-          )
-        )
-        || (
-          resource.data.status == "unhandled"
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
-            "adminNotified",
-            "userNotified",
-            "emailError",
-            "updatedAt"
-          ])
-          && request.resource.data.adminNotified is bool
-          && request.resource.data.userNotified is bool
-          && (request.resource.data.emailError == null || request.resource.data.emailError is string)
-          && request.resource.data.updatedAt is timestamp
-        );
       allow delete: if isAdmin();
     }
 

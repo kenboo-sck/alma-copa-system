@@ -1,15 +1,12 @@
-import {
-  collection,
-  doc,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore/lite";
+import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
 import { z } from "zod";
 
 import { emailService } from "@/lib/email";
 import { collections } from "@/lib/firebase/collections";
-import { getPublicFirestore } from "@/lib/firebase/public-firestore";
+import {
+  getAdminFirestore,
+  getFirebaseAdminConfigStatus,
+} from "@/lib/firebase/admin";
 import type { InquiryType } from "@/types/inquiry";
 
 export const runtime = "nodejs";
@@ -75,11 +72,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const db = getPublicFirestore();
-  const inquiryRef = doc(collection(db, collections.inquiries));
+  let inquiryRef: DocumentReference;
 
   try {
-    await setDoc(inquiryRef, {
+    const db = getAdminFirestore();
+    inquiryRef = db.collection(collections.inquiries).doc();
+
+    await inquiryRef.set({
       inquiryId: inquiryRef.id,
       name: parsed.data.name,
       email: parsed.data.email,
@@ -90,12 +89,13 @@ export async function POST(request: Request) {
       adminNotified: false,
       userNotified: false,
       emailError: null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
   } catch (error) {
+    const adminStatus = getFirebaseAdminConfigStatus();
     console.error("Contact inquiry Firestore create failed", {
-      inquiryId: inquiryRef.id,
+      adminStatus,
       error,
     });
 
@@ -103,6 +103,7 @@ export async function POST(request: Request) {
       {
         success: false,
         ok: false,
+        code: "CONTACT_INQUIRY_SAVE_FAILED",
         error: "お問い合わせの保存に失敗しました。時間をおいて再度お試しください。",
       },
       { status: 500 },
@@ -146,11 +147,11 @@ export async function POST(request: Request) {
   let notificationStatusSaved = true;
 
   try {
-    await updateDoc(inquiryRef, {
+    await inquiryRef.update({
       adminNotified,
       userNotified,
       emailError,
-      updatedAt: serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
   } catch (error) {
     notificationStatusSaved = false;
@@ -164,21 +165,18 @@ export async function POST(request: Request) {
   }
 
   if (!adminNotified || !userNotified) {
-    return Response.json(
-      {
-        success: false,
-        ok: false,
-        inquirySaved: true,
-        inquiryId: inquiryRef.id,
-        adminNotified,
-        userNotified,
-        notificationStatusSaved,
-        emailError,
-        error:
-          "お問い合わせは保存されましたが、通知メールの送信に失敗しました。時間をおいて再度お試しください。",
-      },
-      { status: 502 },
-    );
+    return Response.json({
+      success: true,
+      ok: true,
+      inquirySaved: true,
+      inquiryId: inquiryRef.id,
+      adminNotified,
+      userNotified,
+      notificationStatusSaved,
+      emailError,
+      emailWarning:
+        "お問い合わせは受け付けましたが、控えメールの送信に失敗した可能性があります。",
+    });
   }
 
   return Response.json({
