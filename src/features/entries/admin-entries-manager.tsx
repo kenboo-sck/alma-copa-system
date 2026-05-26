@@ -19,9 +19,13 @@ import type { EntryType, ReceptionStatus } from "@/types/entry";
 
 type PaymentStatus = "pending" | "paid" | "failed";
 type PaymentStatusFilter = "all" | PaymentStatus;
+type ReceptionStatusFilter = "all" | ReceptionStatus;
+type WeightClassFilter = "all" | string;
+type ViewMode = "list" | "weightClass";
 
 type AdminEntry = {
   id: string;
+  entryId: string;
   eventId: string;
   eventTitle: string;
   entryType: EntryType;
@@ -32,6 +36,7 @@ type AdminEntry = {
   birthDate: Date | null;
   gym: string;
   category: string;
+  weightClass: string;
   paymentStatus: PaymentStatus;
   stripeSessionId: string;
   stripePaymentIntentId: string;
@@ -62,6 +67,8 @@ const receptionStatusLabels: Record<ReceptionStatus, string> = {
   not_checked_in: "未受付",
   checked_in: "受付済",
 };
+
+const unsetWeightClassLabel = "階級未設定";
 
 function toDate(value: unknown): Date | null {
   if (value instanceof Timestamp) {
@@ -117,6 +124,83 @@ function csvCell(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+function getWeightClassName(entry: AdminEntry) {
+  return entry.weightClass.trim() || unsetWeightClassLabel;
+}
+
+function stringField(data: Record<string, unknown>, key: string) {
+  const value = data[key];
+  return typeof value === "string" ? value : "";
+}
+
+function mapEntrySnapshotToAdminEntries(
+  entryId: string,
+  data: Record<string, unknown>,
+): AdminEntry[] {
+  const entryType = toEntryType(data.entryType);
+  const baseEntry = {
+    entryId,
+    eventId: stringField(data, "eventId"),
+    eventTitle: stringField(data, "eventTitle") || "大会未設定",
+    entryType,
+    email: stringField(data, "email"),
+    phone: stringField(data, "phone"),
+    gym: stringField(data, "gym"),
+    paymentStatus: toPaymentStatus(data.paymentStatus),
+    stripeSessionId:
+      stringField(data, "stripeSessionId") ||
+      stringField(data, "stripeCheckoutSessionId"),
+    stripePaymentIntentId: stringField(data, "stripePaymentIntentId"),
+    receptionStatus: toReceptionStatus(data.receptionStatus),
+    checkedInAt: toDate(data.checkedInAt),
+    createdAt: toDate(data.createdAt),
+    updatedAt: toDate(data.updatedAt),
+  };
+
+  if (entryType === "representative" && Array.isArray(data.athletes)) {
+    const athletes = data.athletes.filter(
+      (athlete): athlete is Record<string, unknown> =>
+        Boolean(athlete) && typeof athlete === "object" && !Array.isArray(athlete),
+    );
+
+    if (athletes.length > 0) {
+      return athletes.map((athlete, index) => ({
+        ...baseEntry,
+        id: `${entryId}__athlete_${index}`,
+        name: stringField(athlete, "name"),
+        kana: stringField(athlete, "kana"),
+        birthDate: toDate(athlete.birthDate),
+        category: stringField(athlete, "category"),
+        weightClass: stringField(athlete, "weightClass"),
+      }));
+    }
+  }
+
+  return [
+    {
+      ...baseEntry,
+      id: entryId,
+      name: stringField(data, "name"),
+      kana: stringField(data, "kana"),
+      birthDate: toDate(data.birthDate),
+      category: stringField(data, "category"),
+      weightClass: stringField(data, "weightClass"),
+    },
+  ];
+}
+
+function compareEntriesByName(a: AdminEntry, b: AdminEntry) {
+  const aName = a.kana || a.name;
+  const bName = b.kana || b.name;
+  const nameResult = aName.localeCompare(bName, "ja-JP");
+
+  if (nameResult !== 0) {
+    return nameResult;
+  }
+
+  return (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0);
+}
+
 async function sendIndividualEmail(input: {
   token: string;
   entry: AdminEntry;
@@ -135,7 +219,7 @@ async function sendIndividualEmail(input: {
       body: input.body,
       recipients: [
         {
-          entryId: input.entry.id,
+          entryId: input.entry.entryId,
           eventId: input.entry.eventId,
           eventTitle: input.entry.eventTitle,
           recipientEmail: input.entry.email,
@@ -174,7 +258,7 @@ async function sendBulkEmail(input: {
       subject: input.subject,
       body: input.body,
       recipients: input.entries.map((entry) => ({
-        entryId: entry.id,
+        entryId: entry.entryId,
         eventId: entry.eventId,
         eventTitle: entry.eventTitle,
         recipientEmail: entry.email,
@@ -215,6 +299,11 @@ export function AdminEntriesManager({
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] =
     useState<PaymentStatusFilter>("all");
+  const [receptionStatusFilter, setReceptionStatusFilter] =
+    useState<ReceptionStatusFilter>("all");
+  const [weightClassFilter, setWeightClassFilter] =
+    useState<WeightClassFilter>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [eventFilter, setEventFilter] = useState("all");
   const [qrEntry, setQrEntry] = useState<AdminEntry | null>(null);
   const [mailEntry, setMailEntry] = useState<AdminEntry | null>(null);
@@ -235,39 +324,9 @@ export function AdminEntriesManager({
       collection(db, collections.entries),
       (snapshot) => {
         const nextEntries = snapshot.docs
-          .map((entrySnapshot) => {
-            const data = entrySnapshot.data();
-
-            return {
-              id: entrySnapshot.id,
-              eventId: typeof data.eventId === "string" ? data.eventId : "",
-              eventTitle:
-                typeof data.eventTitle === "string" ? data.eventTitle : "大会未設定",
-              entryType: toEntryType(data.entryType),
-              name: typeof data.name === "string" ? data.name : "",
-              kana: typeof data.kana === "string" ? data.kana : "",
-              email: typeof data.email === "string" ? data.email : "",
-              phone: typeof data.phone === "string" ? data.phone : "",
-              birthDate: toDate(data.birthDate),
-              gym: typeof data.gym === "string" ? data.gym : "",
-              category: typeof data.category === "string" ? data.category : "",
-              paymentStatus: toPaymentStatus(data.paymentStatus),
-              stripeSessionId:
-                typeof data.stripeSessionId === "string"
-                  ? data.stripeSessionId
-                  : typeof data.stripeCheckoutSessionId === "string"
-                    ? data.stripeCheckoutSessionId
-                    : "",
-              stripePaymentIntentId:
-                typeof data.stripePaymentIntentId === "string"
-                  ? data.stripePaymentIntentId
-                  : "",
-              receptionStatus: toReceptionStatus(data.receptionStatus),
-              checkedInAt: toDate(data.checkedInAt),
-              createdAt: toDate(data.createdAt),
-              updatedAt: toDate(data.updatedAt),
-            };
-          })
+          .flatMap((entrySnapshot) =>
+            mapEntrySnapshotToAdminEntries(entrySnapshot.id, entrySnapshot.data()),
+          )
           .sort(
             (a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0),
           );
@@ -317,10 +376,32 @@ export function AdminEntriesManager({
     }));
   }, [entries]);
 
+  const weightClassOptions = useMemo(() => {
+    const map = new Map<string, number>();
+
+    for (const entry of entries) {
+      const weightClassName = getWeightClassName(entry);
+      map.set(weightClassName, (map.get(weightClassName) ?? 0) + 1);
+    }
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => {
+        if (a === unsetWeightClassLabel) {
+          return 1;
+        }
+        if (b === unsetWeightClassLabel) {
+          return -1;
+        }
+        return a.localeCompare(b, "ja-JP");
+      })
+      .map(([weightClassName, count]) => ({ weightClassName, count }));
+  }, [entries]);
+
   const visibleEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
     return entries.filter((entry) => {
+      const weightClassName = getWeightClassName(entry);
       const matchesSearch =
         query.length === 0 ||
         [
@@ -337,11 +418,55 @@ export function AdminEntriesManager({
           .includes(query);
       const matchesPayment =
         paymentStatusFilter === "all" || entry.paymentStatus === paymentStatusFilter;
+      const matchesReception =
+        receptionStatusFilter === "all" ||
+        entry.receptionStatus === receptionStatusFilter;
+      const matchesWeightClass =
+        weightClassFilter === "all" || weightClassName === weightClassFilter;
       const matchesEvent = eventFilter === "all" || entry.eventId === eventFilter;
 
-      return matchesSearch && matchesPayment && matchesEvent;
+      return (
+        matchesSearch &&
+        matchesPayment &&
+        matchesReception &&
+        matchesWeightClass &&
+        matchesEvent
+      );
     });
-  }, [entries, eventFilter, paymentStatusFilter, searchQuery]);
+  }, [
+    entries,
+    eventFilter,
+    paymentStatusFilter,
+    receptionStatusFilter,
+    searchQuery,
+    weightClassFilter,
+  ]);
+
+  const visibleEntriesByWeightClass = useMemo(() => {
+    const map = new Map<string, AdminEntry[]>();
+
+    for (const entry of visibleEntries) {
+      const weightClassName = getWeightClassName(entry);
+      const group = map.get(weightClassName) ?? [];
+      group.push(entry);
+      map.set(weightClassName, group);
+    }
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => {
+        if (a === unsetWeightClassLabel) {
+          return 1;
+        }
+        if (b === unsetWeightClassLabel) {
+          return -1;
+        }
+        return a.localeCompare(b, "ja-JP");
+      })
+      .map(([weightClassName, groupEntries]) => ({
+        weightClassName,
+        entries: [...groupEntries].sort(compareEntriesByName),
+      }));
+  }, [visibleEntries]);
 
   const selectedEntries = useMemo(() => {
     const selectedIds = new Set(selectedEntryIds);
@@ -385,12 +510,13 @@ export function AdminEntriesManager({
       "生年月日",
       "所属",
       "カテゴリ",
+      "階級",
       "決済状態",
       "受付状態",
       "受付日時",
     ];
     const rows = visibleEntries.map((entry) => [
-      entry.id,
+      entry.entryId,
       entry.eventTitle,
       entryTypeLabels[entry.entryType],
       entry.name,
@@ -400,6 +526,7 @@ export function AdminEntriesManager({
       formatDate(entry.birthDate),
       entry.gym,
       entry.category,
+      getWeightClassName(entry),
       paymentStatusLabels[entry.paymentStatus],
       receptionStatusLabels[entry.receptionStatus],
       formatDateTime(entry.checkedInAt),
@@ -422,7 +549,7 @@ export function AdminEntriesManager({
   function toggleReception(entry: AdminEntry) {
     const checkedIn = entry.receptionStatus !== "checked_in";
 
-    return updateEntry(entry.id, {
+    return updateEntry(entry.entryId, {
       receptionStatus: checkedIn ? "checked_in" : "not_checked_in",
       checkedInAt: checkedIn ? serverTimestamp() : null,
     });
@@ -440,7 +567,7 @@ export function AdminEntriesManager({
     setError(null);
 
     try {
-      await deleteDoc(doc(db, collections.entries, entry.id));
+      await deleteDoc(doc(db, collections.entries, entry.entryId));
       setToast("エントリーを削除しました。");
     } catch (caughtError) {
       console.error(caughtError);
@@ -463,18 +590,42 @@ export function AdminEntriesManager({
     );
   }
 
-  function selectAllVisibleEntries() {
+  function selectEntries(entryIds: string[]) {
     setSelectedEntryIds((currentIds) => {
       const nextIds = new Set(currentIds);
-      for (const entryId of visibleEntryIds) {
+      for (const entryId of entryIds) {
         nextIds.add(entryId);
       }
       return Array.from(nextIds);
     });
   }
 
+  function clearEntriesSelection(entryIds: string[]) {
+    setSelectedEntryIds((currentIds) =>
+      currentIds.filter((currentId) => !entryIds.includes(currentId)),
+    );
+  }
+
+  function selectAllVisibleEntries() {
+    selectEntries(visibleEntryIds);
+  }
+
   function clearSelectedEntries() {
     setSelectedEntryIds([]);
+  }
+
+  function toggleWeightClassSelection(groupEntries: AdminEntry[]) {
+    const groupEntryIds = groupEntries.map((entry) => entry.id);
+    const isAllSelected = groupEntryIds.every((entryId) =>
+      selectedEntryIds.includes(entryId),
+    );
+
+    if (isAllSelected) {
+      clearEntriesSelection(groupEntryIds);
+      return;
+    }
+
+    selectEntries(groupEntryIds);
   }
 
   function openBulkMailModal() {
@@ -664,7 +815,7 @@ export function AdminEntriesManager({
       ) : null}
 
       <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px_180px]">
           <label className="space-y-2">
             <span className="text-xs font-semibold text-zinc-400">検索</span>
             <input
@@ -673,6 +824,24 @@ export function AdminEntriesManager({
               placeholder="氏名、メール、QRのIDで検索"
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             />
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">階級</span>
+            <select
+              value={weightClassFilter}
+              onChange={(event) => setWeightClassFilter(event.target.value)}
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            >
+              <option value="all">すべて</option>
+              {weightClassOptions.map((option) => (
+                <option
+                  key={option.weightClassName}
+                  value={option.weightClassName}
+                >
+                  {option.weightClassName}（{option.count}名）
+                </option>
+              ))}
+            </select>
           </label>
           <label className="space-y-2">
             <span className="text-xs font-semibold text-zinc-400">決済状態</span>
@@ -690,6 +859,23 @@ export function AdminEntriesManager({
             </select>
           </label>
           <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">ステータス</span>
+            <select
+              value={receptionStatusFilter}
+              onChange={(event) =>
+                setReceptionStatusFilter(event.target.value as ReceptionStatusFilter)
+              }
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            >
+              <option value="all">すべて</option>
+              <option value="not_checked_in">未受付</option>
+              <option value="checked_in">受付済</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[220px_1fr]">
+          <label className="space-y-2">
             <span className="text-xs font-semibold text-zinc-400">大会</span>
             <select
               value={eventFilter}
@@ -704,6 +890,33 @@ export function AdminEntriesManager({
               ))}
             </select>
           </label>
+          <div className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">表示</span>
+            <div className="grid min-h-11 grid-cols-2 overflow-hidden rounded-md border border-white/10 bg-black p-1">
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`rounded px-3 py-2 text-sm font-semibold transition ${
+                  viewMode === "list"
+                    ? "bg-alma-gold text-black"
+                    : "text-zinc-300 hover:text-white"
+                }`}
+              >
+                通常一覧
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("weightClass")}
+                className={`rounded px-3 py-2 text-sm font-semibold transition ${
+                  viewMode === "weightClass"
+                    ? "bg-alma-gold text-black"
+                    : "text-zinc-300 hover:text-white"
+                }`}
+              >
+                階級別
+              </button>
+            </div>
+          </div>
         </div>
         <div className="mt-4 flex flex-col gap-3 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-zinc-300">
@@ -756,6 +969,246 @@ export function AdminEntriesManager({
         <div className="rounded-lg border border-white/10 bg-white/[0.03] p-8 text-center text-sm text-zinc-400">
           条件に一致するエントリーはありません。
         </div>
+      ) : viewMode === "weightClass" ? (
+        <div className="space-y-5">
+          {visibleEntriesByWeightClass.map((group) => {
+            const groupEntryIds = group.entries.map((entry) => entry.id);
+            const groupSelectedCount = groupEntryIds.filter((entryId) =>
+              selectedEntryIds.includes(entryId),
+            ).length;
+            const isGroupSelected =
+              group.entries.length > 0 && groupSelectedCount === group.entries.length;
+            const paidCount = group.entries.filter(
+              (entry) => entry.paymentStatus === "paid",
+            ).length;
+            const checkedInCount = group.entries.filter(
+              (entry) => entry.receptionStatus === "checked_in",
+            ).length;
+
+            return (
+              <section
+                key={group.weightClassName}
+                className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"
+              >
+                <div className="border-b border-white/10 bg-black/40 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <label className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isGroupSelected}
+                        onChange={() => toggleWeightClassSelection(group.entries)}
+                        className="mt-1 h-4 w-4 accent-alma-gold"
+                        aria-label={`${group.weightClassName}を全選択`}
+                      />
+                      <div>
+                        <h2 className="text-lg font-bold text-white">
+                          {group.weightClassName}（{group.entries.length}名）
+                        </h2>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          選択中 {groupSelectedCount}名
+                        </p>
+                      </div>
+                    </label>
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs sm:flex sm:text-left">
+                      <div className="rounded-md border border-white/10 bg-black px-3 py-2">
+                        <p className="text-zinc-500">支払い済み</p>
+                        <p className="mt-1 font-semibold text-emerald-300">
+                          {paidCount}/{group.entries.length}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-white/10 bg-black px-3 py-2">
+                        <p className="text-zinc-500">未払い</p>
+                        <p className="mt-1 font-semibold text-zinc-200">
+                          {group.entries.length - paidCount}
+                        </p>
+                      </div>
+                      <div className="rounded-md border border-white/10 bg-black px-3 py-2">
+                        <p className="text-zinc-500">受付済</p>
+                        <p className="mt-1 font-semibold text-alma-gold">
+                          {checkedInCount}/{group.entries.length}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 p-4 xl:hidden">
+                  {group.entries.map((entry) => (
+                    <article
+                      key={entry.id}
+                      className="rounded-lg border border-white/10 bg-black/30 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <label className="flex min-w-0 items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedEntryIds.includes(entry.id)}
+                            onChange={() => toggleEntrySelection(entry.id)}
+                            className="mt-1 h-4 w-4 accent-alma-gold"
+                            aria-label={`${entry.name}を選択`}
+                          />
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-white">{entry.name}</h3>
+                            <p className="mt-1 text-sm text-zinc-400">
+                              {entry.eventTitle}
+                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {entry.email}
+                            </p>
+                          </div>
+                        </label>
+                        <StatusBadge
+                          label={paymentStatusLabels[entry.paymentStatus]}
+                          tone={paymentStatusTones[entry.paymentStatus]}
+                        />
+                      </div>
+                      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                        <div>
+                          <dt className="text-xs text-zinc-500">階級</dt>
+                          <dd className="mt-1 text-zinc-200">
+                            {getWeightClassName(entry)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-zinc-500">受付</dt>
+                          <dd className="mt-1 text-zinc-200">
+                            {receptionStatusLabels[entry.receptionStatus]}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-xs text-zinc-500">作成日時</dt>
+                          <dd className="mt-1 text-zinc-200">
+                            {formatDateTime(entry.createdAt)}
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                        <button
+                          type="button"
+                          onClick={() => void toggleReception(entry)}
+                          className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                        >
+                          受付済切替
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQrEntry(entry)}
+                          className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                        >
+                          QR表示
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openMailModal(entry)}
+                          className="rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                        >
+                          メール
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void deleteEntry(entry)}
+                          className="rounded-md border border-red-800/70 px-3 py-2 text-sm text-red-200 hover:border-red-500 hover:text-red-100"
+                        >
+                          削除
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="hidden overflow-x-auto xl:block">
+                  <table className="w-full min-w-[1120px] text-left text-sm">
+                    <thead className="border-b border-white/10 bg-black/30 text-xs text-zinc-400">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold">選択</th>
+                        <th className="px-4 py-3 font-semibold">氏名</th>
+                        <th className="px-4 py-3 font-semibold">大会</th>
+                        <th className="px-4 py-3 font-semibold">種別</th>
+                        <th className="px-4 py-3 font-semibold">決済</th>
+                        <th className="px-4 py-3 font-semibold">受付</th>
+                        <th className="px-4 py-3 font-semibold">作成日時</th>
+                        <th className="px-4 py-3 font-semibold">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.entries.map((entry) => (
+                        <tr
+                          key={entry.id}
+                          className="border-b border-white/5 align-top"
+                        >
+                          <td className="px-4 py-4">
+                            <input
+                              type="checkbox"
+                              checked={selectedEntryIds.includes(entry.id)}
+                              onChange={() => toggleEntrySelection(entry.id)}
+                              className="h-4 w-4 accent-alma-gold"
+                              aria-label={`${entry.name}を選択`}
+                            />
+                          </td>
+                          <td className="px-4 py-4">
+                            <p className="font-semibold text-white">{entry.name}</p>
+                            <p className="mt-1 text-xs text-zinc-500">{entry.kana}</p>
+                            <p className="mt-1 text-xs text-zinc-500">{entry.email}</p>
+                          </td>
+                          <td className="px-4 py-4 text-zinc-300">
+                            {entry.eventTitle}
+                          </td>
+                          <td className="px-4 py-4 text-zinc-300">
+                            {entryTypeLabels[entry.entryType]}
+                          </td>
+                          <td className="px-4 py-4">
+                            <StatusBadge
+                              label={paymentStatusLabels[entry.paymentStatus]}
+                              tone={paymentStatusTones[entry.paymentStatus]}
+                            />
+                          </td>
+                          <td className="px-4 py-4 text-zinc-300">
+                            {receptionStatusLabels[entry.receptionStatus]}
+                          </td>
+                          <td className="px-4 py-4 text-zinc-300">
+                            {formatDateTime(entry.createdAt)}
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void toggleReception(entry)}
+                                className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                              >
+                                受付
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setQrEntry(entry)}
+                                className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                              >
+                                QR
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openMailModal(entry)}
+                                className="rounded-md border border-white/10 px-2 py-1.5 text-xs text-zinc-200 hover:border-alma-gold hover:text-alma-gold"
+                              >
+                                メール
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteEntry(entry)}
+                                className="rounded-md border border-red-800/70 px-2 py-1.5 text-xs text-red-200 hover:border-red-500 hover:text-red-100"
+                              >
+                                削除
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            );
+          })}
+        </div>
       ) : (
         <>
           <div className="grid gap-3 xl:hidden">
@@ -787,9 +1240,9 @@ export function AdminEntriesManager({
                 </div>
                 <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                   <div>
-                    <dt className="text-xs text-zinc-500">種別 / カテゴリ</dt>
+                    <dt className="text-xs text-zinc-500">種別 / 階級</dt>
                     <dd className="mt-1 text-zinc-200">
-                      {entryTypeLabels[entry.entryType]} / {entry.category}
+                      {entryTypeLabels[entry.entryType]} / {getWeightClassName(entry)}
                     </dd>
                   </div>
                   <div>
@@ -861,7 +1314,7 @@ export function AdminEntriesManager({
                     <th className="px-4 py-3 font-semibold">氏名</th>
                     <th className="px-4 py-3 font-semibold">大会</th>
                     <th className="px-4 py-3 font-semibold">種別</th>
-                    <th className="px-4 py-3 font-semibold">カテゴリ</th>
+                    <th className="px-4 py-3 font-semibold">階級</th>
                     <th className="px-4 py-3 font-semibold">決済</th>
                     <th className="px-4 py-3 font-semibold">受付</th>
                     <th className="px-4 py-3 font-semibold">作成日時</th>
@@ -889,7 +1342,9 @@ export function AdminEntriesManager({
                       <td className="px-4 py-4 text-zinc-300">
                         {entryTypeLabels[entry.entryType]}
                       </td>
-                      <td className="px-4 py-4 text-zinc-300">{entry.category}</td>
+                      <td className="px-4 py-4 text-zinc-300">
+                        {getWeightClassName(entry)}
+                      </td>
                       <td className="px-4 py-4">
                         <StatusBadge
                           label={paymentStatusLabels[entry.paymentStatus]}
@@ -949,12 +1404,12 @@ export function AdminEntriesManager({
             <p className="text-sm font-semibold text-alma-gold">受付QRコード</p>
             <h2 className="mt-2 text-lg font-bold text-white">{qrEntry.name}</h2>
             <img
-              alt={`${qrEntry.id} のQRコード`}
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrEntry.id)}`}
+              alt={`${qrEntry.entryId} のQRコード`}
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrEntry.entryId)}`}
               className="mx-auto mt-5 rounded-md bg-white p-3"
             />
             <p className="mt-4 break-all font-mono text-xs text-zinc-400">
-              {qrEntry.id}
+              {qrEntry.entryId}
             </p>
             <button
               type="button"
