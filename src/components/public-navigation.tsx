@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { ArrowLeftIcon, HomeIcon, MenuIcon, TrophyIcon } from "@/components/icons";
+import { SiteLogo } from "@/components/site-logo";
 
 const navLinks = [
   { label: "TOP", href: "/" },
@@ -87,9 +88,9 @@ export function PublicNavigation() {
     <>
       <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-black/58 backdrop-blur-xl">
         <div className="mx-auto flex min-h-16 w-full max-w-[1200px] items-center justify-between px-4 sm:px-6 lg:px-8">
-          <Link href="/" className="group flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-md border border-alma-gold/35 bg-alma-gold/10 text-alma-gold">
-              <TrophyIcon size={18} />
+          <Link href="/" className="group flex min-w-0 items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-white/10 bg-white/8 p-1.5">
+              <SiteLogo className="max-h-7 w-full" />
             </span>
             <span>
               <span className="block text-sm font-black uppercase tracking-[0.28em] text-white transition group-hover:text-alma-gold">

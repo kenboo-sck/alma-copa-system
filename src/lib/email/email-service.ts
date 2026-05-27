@@ -2,8 +2,11 @@ import "server-only";
 
 import type { EmailSendResult, EntryEmailMessage, EntryEmailPayload } from "./types";
 
+import { getSiteUrl } from "@/lib/site-url";
+
 const RESEND_API_URL = "https://api.resend.com/emails";
 const DEFAULT_MAIL_PROVIDER = "resend";
+const LOGO_PATH = "/images/alma-logo.svg";
 
 type MailProvider = "php" | "resend";
 
@@ -30,6 +33,10 @@ function getApiKey() {
 
 function getAdminEmail() {
   return process.env.ADMIN_NOTIFICATION_EMAIL ?? "";
+}
+
+function getLogoUrl() {
+  return `${getSiteUrl()}${LOGO_PATH}`;
 }
 
 function getPhpMailApiUrl() {
@@ -113,6 +120,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
   const eventTitle = escapeHtml(payload.eventTitle);
   const entryTypeLabel = getEntryTypeLabel(payload.entryType);
   const contactEmail = "info@copa-alma.com";
+  const logoUrl = getLogoUrl();
   const text = [
     `${payload.applicantName} 様`,
     "",
@@ -154,7 +162,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
               <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;">
                 <tr>
                   <td style="padding:0 0 16px 0;text-align:center;">
-                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">COPA ALMA</div>
+                    <img src="${logoUrl}" width="76" height="61" alt="COPA ALMA" style="display:block;width:76px;max-width:76px;height:auto;margin:0 auto;object-fit:contain;border:0;">
                     <div style="margin-top:8px;font-size:12px;line-height:1.5;letter-spacing:2px;color:#8f8776;">TOURNAMENT ENTRY</div>
                   </td>
                 </tr>
@@ -329,6 +337,7 @@ function buildEntryEmailMessages(payload: EntryEmailPayload): EntryEmailMessage[
 function buildManualEmail(input: { subject: string; body: string }) {
   const escapedSubject = escapeHtml(input.subject);
   const htmlBody = textToHtml(input.body);
+  const logoUrl = getLogoUrl();
   const html = `
     <!doctype html>
     <html lang="ja">
@@ -344,7 +353,7 @@ function buildManualEmail(input: { subject: string; body: string }) {
               <table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;">
                 <tr>
                   <td style="padding:0 0 16px 0;text-align:center;">
-                    <div style="font-size:28px;line-height:1.1;font-weight:700;letter-spacing:3px;color:#d6b25e;">COPA ALMA</div>
+                    <img src="${logoUrl}" width="76" height="61" alt="COPA ALMA" style="display:block;width:76px;max-width:76px;height:auto;margin:0 auto;object-fit:contain;border:0;">
                   </td>
                 </tr>
                 <tr>

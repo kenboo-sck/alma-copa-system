@@ -6,6 +6,8 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { SiteLogo } from "@/components/site-logo";
+
 import { useAdminAuth } from "./admin-auth-provider";
 
 const loginSchema = z.object({
@@ -43,10 +45,15 @@ export function AdminLoginForm() {
 
   return (
     <main className="grid min-h-screen place-items-center bg-zinc-950 px-4 text-zinc-100">
-      <section className="w-full max-w-sm rounded-lg border border-white/10 bg-white/[0.035] p-6 shadow-2xl shadow-black/40">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
-          COPA ALMA
-        </p>
+      <section className="w-[calc(100vw-2rem)] max-w-sm rounded-lg border border-white/10 bg-white/[0.035] p-6 shadow-2xl shadow-black/40">
+        <div className="flex items-center gap-3">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md border border-white/10 bg-white/8 p-2">
+            <SiteLogo className="max-h-8 w-full" />
+          </span>
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
+            COPA ALMA
+          </p>
+        </div>
         <h1 className="mt-3 text-2xl font-bold text-white">管理者ログイン</h1>
         <p className="mt-2 text-sm text-zinc-400">
           管理者アカウントでログインしてください。

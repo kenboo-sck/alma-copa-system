@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { SiteLogo } from "@/components/site-logo";
+
 const footerLinks: Array<{
   label: string;
   href: string;
@@ -32,9 +34,14 @@ export function SiteFooter() {
       <div className="mx-auto w-full max-w-[1180px] px-4 py-10 sm:px-6 lg:px-8">
         <div className="flex flex-col gap-8">
           <div className="max-w-xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.38em] text-alma-gold">
-              COPA ALMA Entry System
-            </p>
+            <div className="flex items-center gap-3">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md border border-white/10 bg-white/8 p-2">
+                <SiteLogo className="max-h-8 w-full" />
+              </span>
+              <p className="text-xs font-semibold uppercase tracking-[0.32em] text-alma-gold">
+                COPA ALMA Entry System
+              </p>
+            </div>
             <p className="mt-3 text-sm leading-7 text-zinc-400">
               ブラジリアン柔術大会のエントリー受付システムです。
             </p>

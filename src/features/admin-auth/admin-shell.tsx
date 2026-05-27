@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 
+import { SiteLogo } from "@/components/site-logo";
+
 import { useAdminAuth } from "./admin-auth-provider";
 
 const navItems = [
@@ -22,7 +24,10 @@ function LoadingState() {
   return (
     <div className="grid min-h-screen place-items-center bg-zinc-950 px-4 text-zinc-100">
       <div className="rounded-lg border border-white/10 bg-white/[0.03] p-6 text-center">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-md border border-white/10 bg-white/8 p-2">
+          <SiteLogo className="max-h-8 w-full" />
+        </span>
+        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
           COPA ALMA
         </p>
         <p className="mt-3 text-sm text-zinc-400">認証状態を確認しています。</p>
@@ -58,11 +63,16 @@ export function AdminShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-white/10 bg-zinc-950 px-4 py-5 lg:block">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
-            COPA ALMA
-          </p>
-          <p className="mt-1 text-sm text-zinc-400">管理コンソール</p>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-white/10 bg-white/8 p-2">
+            <SiteLogo className="max-h-7 w-full" />
+          </span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-alma-gold">
+              COPA ALMA
+            </p>
+            <p className="mt-1 text-sm text-zinc-400">管理コンソール</p>
+          </div>
         </div>
         <nav className="mt-8 space-y-1">
           {navItems.map((item) => {

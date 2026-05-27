@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { SiteLogo } from "@/components/site-logo";
+
 function useParallaxOffset() {
   const [offset, setOffset] = useState(0);
 
@@ -60,21 +62,29 @@ export function SiteHero() {
 
       <div className="relative z-20 mx-auto flex min-h-[58vh] w-full max-w-[1180px] items-end px-4 py-7 sm:min-h-[64vh] sm:px-6 sm:py-9 lg:min-h-[58vh] lg:px-8 lg:py-10">
         <div className="max-w-[46rem] pb-1 sm:pb-2">
-          <p className="text-[0.65rem] font-semibold uppercase tracking-[0.42em] text-alma-gold/90 sm:text-xs">
-            COPA ALMA Entry System
-          </p>
-          <h1 className="mt-3 text-[clamp(2.8rem,8vw,6.4rem)] font-black uppercase leading-[0.9] tracking-[-0.04em] text-white">
-            COPA ALMA
-          </h1>
+          <div className="flex items-center gap-3 sm:gap-4">
+            <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-white/12 bg-black/30 p-2.5 backdrop-blur sm:h-24 sm:w-24 sm:p-3">
+              <SiteLogo className="max-h-12 w-full sm:max-h-20" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.42em] text-alma-gold/90 sm:text-xs">
+                COPA ALMA Entry System
+              </p>
+              <h1 className="sr-only">COPA ALMA</h1>
+              <p className="mt-2 text-[clamp(2rem,7vw,5.4rem)] font-black uppercase leading-[0.9] text-white">
+                COPA ALMA
+              </p>
+            </div>
+          </div>
           <p className="mt-3 max-w-2xl text-[clamp(1.1rem,2.6vw,2.6rem)] font-black uppercase leading-[1.05] tracking-[0.06em] text-alma-gold">
             TEST YOUR TECHNIQUE.
           </p>
           <p className="mt-1.5 max-w-2xl text-[clamp(0.95rem,2vw,1.8rem)] font-semibold uppercase leading-[1.08] tracking-[0.05em] text-zinc-100/95">
             ELEVATE YOUR JIU-JITSU.
           </p>
-          <p className="mt-4 max-w-xl text-sm leading-7 text-zinc-300 sm:text-base sm:leading-8">
-            すべての挑戦者に、最高の舞台を。 ALMA
-            COPAは、ブラジリアン柔術の緊張感とリスペクトを体現する大会エントリーサイトです。
+          <p className="mt-4 max-w-xl break-all text-sm leading-7 text-zinc-300 sm:break-words sm:text-base sm:leading-8">
+            すべての挑戦者に、最高の舞台を。
+            COPA ALMAは、ブラジリアン柔術の緊張感とリスペクトを体現する大会エントリーサイトです。
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
