@@ -131,7 +131,9 @@ export const defaultEventFormValues: EventFormValues = {
   lateStartAt: "",
   lateEndAt: "",
   status: "draft",
-  paymentCard: true,
+  // 新しい大会では支払方法を最初から選択しない（少なくとも 1 つを選ぶまで保存できない）。
+  // カード決済は Stripe の契約・本番設定が完了してから有効にする。
+  paymentCard: false,
   paymentBankTransfer: false,
   paymentCash: false,
   bankAccountInfo: "",

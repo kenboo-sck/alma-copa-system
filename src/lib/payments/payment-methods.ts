@@ -17,11 +17,21 @@ export const PAYMENT_METHOD_DESCRIPTIONS: Record<PaymentMethod, string> = {
   cash: "お申し込み後、ご案内する方法で現金にてお支払いください。",
 };
 
+// 大会一覧などに表示する、有効な支払方法の要約。
+export function describePaymentMethods(settings: EventPaymentSettings) {
+  if (settings.isUnconfigured) {
+    return "支払方法を設定してください（未設定のため申込不可）";
+  }
+
+  return settings.methods.map((method) => PAYMENT_METHOD_LABELS[method]).join("・");
+}
+
 export function isPaymentMethod(value: unknown): value is PaymentMethod {
   return value === "card" || value === "bank_transfer" || value === "cash";
 }
 
 // 支払方法を持たないエントリー（この機能の追加前の申込）はカード決済として扱う。
+// （大会の支払設定とは別。申込済みのエントリーの読み替えにだけ使う）
 export function toPaymentMethod(value: unknown): PaymentMethod {
   return isPaymentMethod(value) ? value : "card";
 }
@@ -32,6 +42,9 @@ export function toPaymentMethod(value: unknown): PaymentMethod {
 
 export type EventPaymentSettings = {
   methods: PaymentMethod[];
+  // 大会に支払方法が設定されていない（既存の大会）。この場合は支払方法なしとして扱い、
+  // 管理者が支払方法を設定するまで申込を受け付けない（Stripe の決済も作らない）。
+  isUnconfigured: boolean;
   bankTransfer: {
     // 振込先（銀行名・支店名・口座種別・口座番号・口座名義など）。
     accountInfo: string;
@@ -66,7 +79,8 @@ export function isDateInputValue(value: string) {
   return !Number.isNaN(parsed.getTime()) && toJapanDateInputValue(parsed) === value;
 }
 
-// 大会ドキュメントから支払設定を読む。設定がない既存の大会はカードのみとして扱う。
+// 大会ドキュメントから支払設定を読む。設定がない既存の大会は支払方法なし（申込不可）として扱う。
+// 既存の大会データは書き換えず、読み取り時の扱いだけを決める。
 export function getEventPaymentSettings(data: DataRecord): EventPaymentSettings {
   const methods = Array.isArray(data.paymentMethods)
     ? PAYMENT_METHODS.filter((method) =>
@@ -78,7 +92,8 @@ export function getEventPaymentSettings(data: DataRecord): EventPaymentSettings 
   const dueDate = stringField(bankTransfer, "dueDate");
 
   return {
-    methods: methods.length > 0 ? methods : ["card"],
+    methods,
+    isUnconfigured: methods.length === 0,
     bankTransfer: {
       accountInfo: stringField(bankTransfer, "accountInfo"),
       note: stringField(bankTransfer, "note"),
@@ -91,7 +106,8 @@ export function getEventPaymentSettings(data: DataRecord): EventPaymentSettings 
 }
 
 export const defaultEventPaymentSettings: EventPaymentSettings = {
-  methods: ["card"],
+  methods: [],
+  isUnconfigured: true,
   bankTransfer: { accountInfo: "", note: "", dueDate: "" },
   cash: { note: "" },
 };

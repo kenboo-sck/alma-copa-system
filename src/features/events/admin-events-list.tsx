@@ -3,6 +3,8 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import type { EventStatus } from "@/types/event";
 
 import type { AdminEvent } from "./admin-event-types";
+import { describePaymentMethods } from "@/lib/payments/payment-methods";
+
 import { eventStatusLabels, eventStatusTones } from "./admin-event-types";
 import { formatDate, formatDateTime } from "./admin-event-utils";
 
@@ -98,6 +100,13 @@ export function AdminEventsList({
                 tone={eventStatusTones[event.status]}
               />
             </div>
+            <p
+              className={`mt-2 text-xs ${
+                event.paymentSettings.isUnconfigured ? "text-red-300" : "text-zinc-400"
+              }`}
+            >
+              支払方法: {describePaymentMethods(event.paymentSettings)}
+            </p>
             <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-xs text-zinc-500">開催日</dt>
@@ -110,12 +119,15 @@ export function AdminEventsList({
               <div className="sm:col-span-2">
                 <dt className="text-xs text-zinc-500">エントリー受付期間</dt>
                 <dd className="mt-1 text-zinc-200">
-                  {formatDateTime(event.entryStartAt)} - {formatDateTime(event.entryEndAt)}
+                  {formatDateTime(event.entryStartAt)} -{" "}
+                  {formatDateTime(event.entryEndAt)}
                 </dd>
               </div>
               <div>
                 <dt className="text-xs text-zinc-500">作成日</dt>
-                <dd className="mt-1 text-zinc-200">{formatDateTime(event.createdAt)}</dd>
+                <dd className="mt-1 text-zinc-200">
+                  {formatDateTime(event.createdAt)}
+                </dd>
               </div>
             </dl>
             <div className="mt-4">
@@ -165,6 +177,15 @@ export function AdminEventsList({
                       label={eventStatusLabels[event.status]}
                       tone={eventStatusTones[event.status]}
                     />
+                    <p
+                      className={`mt-2 text-xs ${
+                        event.paymentSettings.isUnconfigured
+                          ? "text-red-300"
+                          : "text-zinc-400"
+                      }`}
+                    >
+                      支払: {describePaymentMethods(event.paymentSettings)}
+                    </p>
                   </td>
                   <td className="px-4 py-4 text-zinc-300">
                     {formatDateTime(event.entryStartAt)}

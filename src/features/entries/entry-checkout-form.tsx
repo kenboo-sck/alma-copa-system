@@ -18,6 +18,7 @@ import {
   saveEntryDraft,
   type EntryDraftValues,
 } from "@/lib/entries/entry-storage";
+import { getAvailablePaymentMethods } from "@/lib/payments/payment-methods";
 import {
   formatDate,
   formatDateTime,
@@ -349,6 +350,13 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
       return;
     }
 
+    if (!hasPaymentMethod) {
+      setError(
+        "この大会は現在、Webでのお申し込みを受け付けていません。運営までお問い合わせください。",
+      );
+      return;
+    }
+
     setError(null);
 
     // 出場しない部門・対象外の項目を取り除いてから検証・保存する。
@@ -421,6 +429,10 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     entryType === "representative" ? "代表者情報入力" : "選手情報入力";
 
   const currentPricing = event ? getCurrentEntryFee(event) : null;
+  // 選択できる支払方法がない大会（未設定など）は、Web 申込を受け付けない。
+  const hasPaymentMethod = event
+    ? getAvailablePaymentMethods(event.paymentSettings).length > 0
+    : true;
   const watchedAthletes = useWatch({ control, name: "athletes" }) ?? [];
 
   return (
@@ -480,6 +492,12 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
           {error || eventError ? (
             <div className="mb-5 rounded-md border border-red-700/70 bg-red-950/80 px-4 py-3 text-sm text-red-100">
               {error ?? eventError}
+            </div>
+          ) : null}
+          {event && !hasPaymentMethod ? (
+            <div className="mb-5 rounded-md border border-alma-gold/50 bg-alma-gold/10 px-4 py-3 text-sm leading-6 text-zinc-100">
+              この大会は現在、Webでのお申し込みを受け付けていません（お支払い方法の準備中です）。
+              お手数ですが、運営までお問い合わせください。
             </div>
           ) : null}
 
@@ -904,7 +922,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                   </button>
                   <button
                     type="submit"
-                    disabled={isLoadingEvent || !event}
+                    disabled={isLoadingEvent || !event || !hasPaymentMethod}
                     className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-md bg-alma-gold px-6 py-3 text-sm font-black text-black shadow-[0_16px_40px_rgba(214,173,69,0.24)] transition hover:bg-[#e0be58] disabled:cursor-not-allowed disabled:opacity-55"
                   >
                     <TrophyIcon size={18} />

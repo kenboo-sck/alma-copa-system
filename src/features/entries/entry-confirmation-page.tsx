@@ -740,7 +740,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                   </p>
                   {availablePaymentMethods.length === 0 ? (
                     <p className="mt-3 text-sm leading-6 text-red-200">
-                      現在選択できるお支払い方法がありません。お手数ですが運営までお問い合わせください。
+                      この大会は現在、Webでのお申し込みを受け付けていません（選択できるお支払い方法がありません）。
+                      お手数ですが運営までお問い合わせください。
                     </p>
                   ) : (
                     <div className="mt-3 space-y-3">

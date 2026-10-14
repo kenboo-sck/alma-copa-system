@@ -26,9 +26,7 @@ function FeatureCard({
       <div className="grid h-11 w-11 place-items-center rounded-full border border-alma-gold/35 bg-alma-gold/10 text-alma-gold">
         {icon}
       </div>
-      <h3 className="mt-4 text-base font-semibold text-white sm:text-lg">
-        {title}
-      </h3>
+      <h3 className="mt-4 text-base font-semibold text-white sm:text-lg">{title}</h3>
       <p className="mt-3 text-sm leading-7 text-zinc-400">{text}</p>
     </div>
   );
@@ -96,8 +94,8 @@ export default function HomePage() {
             />
             <FeatureCard
               icon={<PaymentIcon size={24} />}
-              title="Stripeで決済する"
-              text="安全なStripe Checkoutで支払いを完了します。"
+              title="お支払い方法を選ぶ"
+              text="大会ごとに案内しているお支払い方法（銀行振込・現金払いなど）から選んで申し込みます。"
             />
           </div>
         </div>

@@ -488,6 +488,12 @@ export function AdminEventFormModal({
 
           <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.03] p-4">
             <p className="text-sm font-semibold text-zinc-200">支払方法</p>
+            {event?.paymentSettings.isUnconfigured ? (
+              <p className="mt-2 rounded-md border border-red-700/70 bg-red-950/60 px-3 py-2 text-xs leading-5 text-red-100">
+                支払方法を設定してください。この大会は支払方法が未設定のため、現在申込を受け付けていません。
+                銀行振込・現金払いなどを有効にして保存すると、申込できるようになります。
+              </p>
+            ) : null}
             <p className="mt-1 text-xs leading-5 text-zinc-500">
               申込フォームには、ここで有効にした支払方法だけが表示されます（少なくとも1つ）。
               変更しても、申込済みのエントリーに保存された支払案内は変わりません。
@@ -502,6 +508,10 @@ export function AdminEventFormModal({
                 />
                 クレジットカード（Stripe）
               </label>
+              <span className="block text-xs leading-5 text-zinc-500">
+                Stripe の契約と本番用の設定が完了するまでは有効にしないでください。
+                無効にした大会では、申込画面にカード払いが表示されず、カードでの申込も受け付けません。
+              </span>
               {errors.paymentCard ? (
                 <span className="block text-xs text-red-300">
                   {errors.paymentCard.message}
