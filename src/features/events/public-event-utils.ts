@@ -1,6 +1,7 @@
 import type { DocumentData } from "firebase/firestore";
 
 import {
+  getAvailablePaymentMethods,
   getEventPaymentSettings,
   type EventPaymentSettings,
 } from "@/lib/payments/payment-methods";
@@ -210,6 +211,12 @@ export function getEntryState(event: PublicEvent) {
 
   if (event.entryEndAt && now > event.entryEndAt) {
     return { label: "受付終了", canEnter: false };
+  }
+
+  // 受付期間中でも、選択できる支払方法がない大会（支払方法が未設定など）は申込できない。
+  // 「受付中」とは表示せず、管理者が支払方法を設定するまで「受付準備中」とする。
+  if (getAvailablePaymentMethods(event.paymentSettings, now).length === 0) {
+    return { label: "受付準備中", canEnter: false };
   }
 
   return { label: "受付中", canEnter: true };
