@@ -1,6 +1,11 @@
 import { serverTimestamp, Timestamp, type DocumentData } from "firebase/firestore";
 import { z } from "zod";
 
+import {
+  getEventPaymentSettings,
+  isDateInputValue,
+  type PaymentMethod,
+} from "@/lib/payments/payment-methods";
 import type { EntryStatus } from "@/types/entry";
 import type { EventStatus } from "@/types/event";
 
@@ -24,6 +29,13 @@ export const eventFormSchema = z
     lateStartAt: z.string().min(1, "最終価格開始日を入力してください。"),
     lateEndAt: z.string().min(1, "最終価格終了日を入力してください。"),
     status: z.enum(["draft", "published", "closed"]),
+    paymentCard: z.boolean(),
+    paymentBankTransfer: z.boolean(),
+    paymentCash: z.boolean(),
+    bankAccountInfo: z.string().max(1000, "振込先は1000文字以内で入力してください。"),
+    bankNote: z.string().max(1000, "案内文は1000文字以内で入力してください。"),
+    bankDueDate: z.string(),
+    cashNote: z.string().max(1000, "案内文は1000文字以内で入力してください。"),
     aboutSection: z.object({
       enabled: z.enum(["true", "false"]),
       concept: z.string().max(1200, "大会コンセプトは1200文字以内で入力してください。"),
@@ -65,6 +77,41 @@ export const eventFormSchema = z
   .refine((value) => new Date(value.lateEndAt) > new Date(value.lateStartAt), {
     message: "最終価格終了日は開始日より後にしてください。",
     path: ["lateEndAt"],
+  })
+  .superRefine((value, context) => {
+    if (!value.paymentCard && !value.paymentBankTransfer && !value.paymentCash) {
+      context.addIssue({
+        code: "custom",
+        path: ["paymentCard"],
+        message: "支払方法を少なくとも1つ有効にしてください。",
+      });
+    }
+
+    if (value.paymentBankTransfer) {
+      if (!value.bankAccountInfo.trim()) {
+        context.addIssue({
+          code: "custom",
+          path: ["bankAccountInfo"],
+          message: "振込先を入力してください。",
+        });
+      }
+
+      if (!isDateInputValue(value.bankDueDate)) {
+        context.addIssue({
+          code: "custom",
+          path: ["bankDueDate"],
+          message: "振込期限日を入力してください。",
+        });
+      }
+    }
+
+    if (value.paymentCash && !value.cashNote.trim()) {
+      context.addIssue({
+        code: "custom",
+        path: ["cashNote"],
+        message: "現金払いの案内文を入力してください。",
+      });
+    }
   });
 
 export const defaultEventFormValues: EventFormValues = {
@@ -84,6 +131,13 @@ export const defaultEventFormValues: EventFormValues = {
   lateStartAt: "",
   lateEndAt: "",
   status: "draft",
+  paymentCard: true,
+  paymentBankTransfer: false,
+  paymentCash: false,
+  bankAccountInfo: "",
+  bankNote: "",
+  bankDueDate: "",
+  cashNote: "",
   aboutSection: {
     enabled: "false",
     concept: "",
@@ -191,6 +245,7 @@ export function mapEventData(
     lateEndAt: toDate(data.lateEndAt),
     status:
       data.status === "published" || data.status === "closed" ? data.status : "draft",
+    paymentSettings: getEventPaymentSettings(data),
     imageUrl:
       typeof data.imageUrl === "string"
         ? data.imageUrl
@@ -217,6 +272,12 @@ export function mapEventData(
 }
 
 export function createEventPayload(values: EventFormValues) {
+  const paymentMethods: PaymentMethod[] = [
+    ...(values.paymentCard ? (["card"] as const) : []),
+    ...(values.paymentBankTransfer ? (["bank_transfer"] as const) : []),
+    ...(values.paymentCash ? (["cash"] as const) : []),
+  ];
+
   return {
     title: values.title.trim(),
     description: values.description.trim(),
@@ -234,6 +295,17 @@ export function createEventPayload(values: EventFormValues) {
     lateStartAt: Timestamp.fromDate(new Date(values.lateStartAt)),
     lateEndAt: Timestamp.fromDate(new Date(values.lateEndAt)),
     status: values.status,
+    // 申込済みのエントリーには申込時点の支払案内を保存しているため、
+    // ここを変更しても既存の申込の案内は変わらない。
+    paymentMethods,
+    bankTransfer: {
+      accountInfo: values.bankAccountInfo.trim(),
+      note: values.bankNote.trim(),
+      dueDate: values.bankDueDate,
+    },
+    cashPayment: {
+      note: values.cashNote.trim(),
+    },
     aboutSection: {
       enabled: values.aboutSection.enabled === "true",
       concept: values.aboutSection.concept.trim(),
@@ -264,6 +336,13 @@ export function getEventFormValues(event: AdminEvent): EventFormValues {
     lateStartAt: toDateTimeInputValue(event.lateStartAt),
     lateEndAt: toDateTimeInputValue(event.lateEndAt),
     status: event.status,
+    paymentCard: event.paymentSettings.methods.includes("card"),
+    paymentBankTransfer: event.paymentSettings.methods.includes("bank_transfer"),
+    paymentCash: event.paymentSettings.methods.includes("cash"),
+    bankAccountInfo: event.paymentSettings.bankTransfer.accountInfo,
+    bankNote: event.paymentSettings.bankTransfer.note,
+    bankDueDate: event.paymentSettings.bankTransfer.dueDate,
+    cashNote: event.paymentSettings.cash.note,
     aboutSection: {
       enabled: event.aboutSection.enabled ? "true" : "false",
       concept: event.aboutSection.concept,

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getFirestoreEmulatorHost } from "@/lib/firebase/emulator";
+
 type FirestoreRestValue =
   | { stringValue: string }
   | { integerValue: string }
@@ -29,7 +31,12 @@ export function getFirebaseProjectId() {
 }
 
 function getFirestoreBaseUrl() {
-  return `https://firestore.googleapis.com/v1/projects/${getFirebaseProjectId()}/databases/(default)/documents`;
+  const emulatorHost = getFirestoreEmulatorHost();
+  const origin = emulatorHost
+    ? `http://${emulatorHost}`
+    : "https://firestore.googleapis.com";
+
+  return `${origin}/v1/projects/${getFirebaseProjectId()}/databases/(default)/documents`;
 }
 
 function encodeDocumentPath(path: string) {

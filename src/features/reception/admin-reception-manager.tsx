@@ -13,6 +13,18 @@ import { useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import { readEntryAccounting } from "@/lib/entries/entry-accounting";
+import {
+  describeDivisionEntryRecord,
+  mapEntryAthletes,
+} from "@/lib/entries/entry-records";
+import {
+  PAYMENT_METHOD_LABELS,
+  toEntryPaymentStatus,
+  toPaymentMethod,
+  type EntryPaymentStatus,
+  type PaymentMethod,
+} from "@/lib/payments/payment-methods";
 
 type ReceptionEntry = {
   id: string;
@@ -22,6 +34,9 @@ type ReceptionEntry = {
   category: string;
   receptionStatus: "not_checked_in" | "checked_in";
   checkedInAt: Date | null;
+  paymentStatus: EntryPaymentStatus;
+  paymentMethod: PaymentMethod;
+  totalAmount: number;
 };
 
 function toDate(value: unknown): Date | null {
@@ -61,21 +76,50 @@ export function AdminReceptionManager() {
       collection(db, collections.entries),
       (snapshot) => {
         setEntries(
-          snapshot.docs.map((entrySnapshot) => {
-            const data = entrySnapshot.data();
+          // キャンセル済みの申込は受付の対象外。
+          snapshot.docs
+            .filter((entrySnapshot) => entrySnapshot.data().entryStatus !== "cancelled")
+            .map((entrySnapshot) => {
+              const data = entrySnapshot.data();
 
-            return {
-              id: entrySnapshot.id,
-              eventTitle:
-                typeof data.eventTitle === "string" ? data.eventTitle : "大会未設定",
-              name: typeof data.name === "string" ? data.name : "",
-              kana: typeof data.kana === "string" ? data.kana : "",
-              category: typeof data.category === "string" ? data.category : "",
-              receptionStatus:
-                data.receptionStatus === "checked_in" ? "checked_in" : "not_checked_in",
-              checkedInAt: toDate(data.checkedInAt),
-            };
-          }),
+              return {
+                id: entrySnapshot.id,
+                eventTitle:
+                  typeof data.eventTitle === "string" ? data.eventTitle : "大会未設定",
+                name: typeof data.name === "string" ? data.name : "",
+                kana: typeof data.kana === "string" ? data.kana : "",
+                // 新形式は部門ごとの出場内容、旧形式は従来のカテゴリーを表示する。
+                // 代表者エントリーは選手ごとに氏名を添えて 1 行ずつ並べる。
+                // 取消済みの選手・部門は表示しない（有効な出場だけが受付の対象）。
+                category: mapEntryAthletes(data, toDate)
+                  .filter((athlete) => athlete.status === "active")
+                  .flatMap((athlete) =>
+                    athlete.divisionEntries
+                      .filter((divisionEntry) => divisionEntry.status === "active")
+                      .map((divisionEntry) =>
+                        athlete.format === "v2"
+                          ? describeDivisionEntryRecord(divisionEntry)
+                          : divisionEntry.legacyCategory,
+                      )
+                      .filter(Boolean)
+                      .map((line) =>
+                        athlete.athleteIndex === null
+                          ? line
+                          : `${athlete.name}: ${line}`,
+                      ),
+                  )
+                  .join("\n"),
+                receptionStatus:
+                  data.receptionStatus === "checked_in"
+                    ? "checked_in"
+                    : "not_checked_in",
+                checkedInAt: toDate(data.checkedInAt),
+                paymentStatus: toEntryPaymentStatus(data.paymentStatus),
+                paymentMethod: toPaymentMethod(data.paymentMethod),
+                // 未収額（変更で追加料金が発生した場合は、その差額）。
+                totalAmount: readEntryAccounting(data).dueAmount,
+              };
+            }),
         );
         setIsLoading(false);
         setError(null);
@@ -164,14 +208,31 @@ export function AdminReceptionManager() {
                         entry.receptionStatus === "checked_in" ? "success" : "neutral"
                       }
                     />
+                    <StatusBadge
+                      label={entry.paymentStatus === "paid" ? "支払い済み" : "未払い"}
+                      tone={entry.paymentStatus === "paid" ? "success" : "danger"}
+                    />
                     <span className="text-xs text-zinc-500">
                       {formatDateTime(entry.checkedInAt)}
                     </span>
                   </div>
+                  {entry.paymentStatus === "paid" ? null : (
+                    <p className="mt-2 text-xs font-semibold text-red-300">
+                      参加費に未払いがあります（
+                      {PAYMENT_METHOD_LABELS[entry.paymentMethod]}
+                      {entry.totalAmount > 0
+                        ? ` / ${entry.totalAmount.toLocaleString("ja-JP")}円`
+                        : ""}
+                      ）。入金・現金受領の記録はエントリー管理画面で行います。
+                    </p>
+                  )}
                   <h2 className="mt-2 font-semibold text-white">{entry.name}</h2>
-                  <p className="mt-1 text-sm text-zinc-400">
-                    {entry.eventTitle} / {entry.category}
-                  </p>
+                  <p className="mt-1 text-sm text-zinc-400">{entry.eventTitle}</p>
+                  {entry.category ? (
+                    <p className="mt-1 whitespace-pre-line text-sm text-zinc-400">
+                      {entry.category}
+                    </p>
+                  ) : null}
                   <p className="mt-1 font-mono text-xs text-zinc-500">{entry.id}</p>
                 </div>
                 <button

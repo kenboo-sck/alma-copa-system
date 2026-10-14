@@ -1,15 +1,5 @@
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore/lite";
-
-import { EmailProviderError, emailService } from "@/lib/email";
-import {
-  buildBodyPreview,
-  createPublicMailLog,
-  toMailLogProvider,
-} from "@/lib/email/mail-logs";
-import { collections } from "@/lib/firebase/collections";
-import { getPublicFirestore } from "@/lib/firebase/public-firestore";
+import { confirmCardPayment, deliverEntryEmails } from "@/lib/entries/entry-server";
 import { paymentService } from "@/lib/payments";
-import type { StripeWebhookEventResult } from "@/lib/payments/types";
 
 export const runtime = "nodejs";
 
@@ -21,6 +11,8 @@ function logWebhookEvent(
     entryId?: string | null;
     eventId?: string | null;
     paymentIntentId?: string | null;
+    result?: string;
+    reason?: string;
     error?: unknown;
   },
 ) {
@@ -30,6 +22,8 @@ function logWebhookEvent(
     entryId: details.entryId ?? null,
     eventId: details.eventId ?? null,
     paymentIntentId: details.paymentIntentId ?? null,
+    result: details.result ?? null,
+    reason: details.reason ?? null,
     error:
       details.error instanceof Error
         ? {
@@ -41,186 +35,8 @@ function logWebhookEvent(
   });
 }
 
-async function getEntryEmailPayload(
-  db: ReturnType<typeof getPublicFirestore>,
-  event: StripeWebhookEventResult,
-) {
-  const snapshot = event.entryId
-    ? await getDoc(doc(db, collections.entries, event.entryId)).catch(() => null)
-    : null;
-  const data = snapshot?.exists() ? (snapshot.data() as Record<string, unknown>) : {};
-
-  const eventId =
-    event.eventId ?? (typeof data.eventId === "string" ? data.eventId : "");
-  const eventTitle =
-    event.eventTitle ?? (typeof data.eventTitle === "string" ? data.eventTitle : "");
-  const entryType =
-    event.entryType ??
-    (data.entryType === "individual" || data.entryType === "representative"
-      ? data.entryType
-      : undefined);
-  const applicantName =
-    event.applicantName ?? (typeof data.name === "string" ? data.name : "");
-  const applicantEmail =
-    event.email ?? (typeof data.email === "string" ? data.email : "");
-
-  if (
-    !event.entryId ||
-    !eventId ||
-    !eventTitle ||
-    !entryType ||
-    !applicantName ||
-    !applicantEmail
-  ) {
-    return null;
-  }
-
-  return {
-    entryId: event.entryId,
-    eventId,
-    eventTitle,
-    entryType,
-    applicantName,
-    applicantEmail,
-    paymentStatus: "paid" as const,
-    sessionId: event.sessionId,
-  };
-}
-
-async function sendEntryEmailsAfterPayment(
-  db: ReturnType<typeof getPublicFirestore>,
-  event: StripeWebhookEventResult,
-) {
-  const status = emailService.getEnvironmentStatus();
-  console.info("Stripe webhook entry email send started", {
-    type: event.type,
-    sessionId: event.sessionId ?? null,
-    entryId: event.entryId ?? null,
-    eventId: event.eventId ?? null,
-    provider: status.provider,
-    isConfigured: status.isConfigured,
-    missingKeys: status.missingKeys,
-    warnings: status.warnings,
-    phpMailApiUrl: status.phpMailApiUrl,
-  });
-
-  const payload = await getEntryEmailPayload(db, event);
-  if (!payload) {
-    console.error("Stripe webhook entry email payload missing", {
-      type: event.type,
-      sessionId: event.sessionId ?? null,
-      entryId: event.entryId ?? null,
-      eventId: event.eventId ?? null,
-      hasEventTitle: Boolean(event.eventTitle),
-      hasEntryType: Boolean(event.entryType),
-      hasApplicantName: Boolean(event.applicantName),
-      hasApplicantEmail: Boolean(event.email),
-      provider: status.provider,
-      phpMailApiUrl: status.phpMailApiUrl,
-    });
-    return;
-  }
-
-  if (!status.isConfigured) {
-    console.error("Stripe webhook entry email service is not configured", {
-      entryId: payload.entryId,
-      eventId: payload.eventId,
-      sessionId: payload.sessionId ?? null,
-      provider: status.provider,
-      missingKeys: status.missingKeys,
-      warnings: status.warnings,
-      phpMailApiUrl: status.phpMailApiUrl,
-    });
-    return;
-  }
-
-  try {
-    const results = await emailService.sendEntryEmails(payload);
-    const messages = emailService.getEntryEmailMessages(payload);
-
-    await Promise.allSettled(
-      messages.map((message) =>
-        createPublicMailLog(db, {
-          entryId: payload.entryId,
-          eventId: payload.eventId,
-          eventTitle: payload.eventTitle,
-          recipientEmail: message.recipientEmail,
-          recipientName: message.recipientName,
-          recipientType: message.recipientType,
-          mailType: "entry_completed",
-          subject: message.subject,
-          bodyPreview: buildBodyPreview(message.text),
-          status: "sent",
-          errorMessage: null,
-          provider: toMailLogProvider(status.provider),
-          createdByAdminUid: null,
-          createdByAdminEmail: null,
-        }),
-      ),
-    );
-
-    console.info("Stripe webhook entry emails sent", {
-      entryId: payload.entryId,
-      eventId: payload.eventId,
-      sessionId: payload.sessionId ?? null,
-      provider: status.provider,
-      phpMailApiUrl: status.phpMailApiUrl,
-      recipients: results.map((result) => result.recipient),
-      results,
-    });
-  } catch (error) {
-    const failedRecipient =
-      error instanceof EmailProviderError
-        ? error.details.recipient
-        : payload.applicantEmail;
-    const failedMessage = emailService
-      .getEntryEmailMessages(payload)
-      .find((message) => message.recipientEmail === failedRecipient);
-
-    if (failedMessage) {
-      await createPublicMailLog(db, {
-        entryId: payload.entryId,
-        eventId: payload.eventId,
-        eventTitle: payload.eventTitle,
-        recipientEmail: failedMessage.recipientEmail,
-        recipientName: failedMessage.recipientName,
-        recipientType: failedMessage.recipientType,
-        mailType: "entry_completed",
-        subject: failedMessage.subject,
-        bodyPreview: buildBodyPreview(failedMessage.text),
-        status: "failed",
-        errorMessage: error instanceof Error ? error.message : String(error),
-        provider: toMailLogProvider(status.provider),
-        createdByAdminUid: null,
-        createdByAdminEmail: null,
-      }).catch((logError) => {
-        console.error("Stripe webhook entry email failure log write failed", {
-          entryId: payload.entryId,
-          eventId: payload.eventId,
-          recipient: failedMessage.recipientEmail,
-          error: logError,
-        });
-      });
-    }
-
-    console.error("Stripe webhook entry emails failed", {
-      entryId: payload.entryId,
-      eventId: payload.eventId,
-      sessionId: payload.sessionId ?? null,
-      provider: status.provider,
-      phpMailApiUrl: status.phpMailApiUrl,
-      error:
-        error instanceof Error
-          ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            }
-          : error,
-    });
-  }
-}
-
+// Stripe の署名を検証した Webhook だけが、カード決済を支払済みにできる
+// （同じ確認処理を、決済完了画面からの問い合わせでもサーバー側で行う）。
 export async function POST(request: Request) {
   const signature = request.headers.get("stripe-signature");
   const body = await request.text();
@@ -234,77 +50,84 @@ export async function POST(request: Request) {
     );
   }
 
+  let event: ReturnType<typeof paymentService.constructStripeWebhookEvent>;
+
   try {
-    const event = paymentService.constructStripeWebhookEvent(body, signature);
-
-    logWebhookEvent("Stripe webhook received", {
-      type: event.type,
-      entryId: event.entryId ?? null,
-      eventId: event.eventId ?? null,
-      sessionId: event.sessionId ?? null,
-      paymentIntentId: event.paymentIntentId ?? null,
-    });
-
-    if (event.type === "checkout.session.completed") {
-      if (!event.entryId) {
-        logWebhookEvent("Stripe webhook missing entryId", {
-          type: event.type,
-          sessionId: event.sessionId ?? null,
-          eventId: event.eventId ?? null,
-          paymentIntentId: event.paymentIntentId ?? null,
-        });
-
-        return Response.json(
-          { received: false, error: "Checkout Session metadata.entryId is missing." },
-          { status: 400 },
-        );
-      }
-
-      try {
-        const db = getPublicFirestore();
-        await updateDoc(doc(db, collections.entries, event.entryId), {
-          paymentStatus: "paid",
-          entryStatus: "confirmed",
-          stripeCheckoutSessionId: event.sessionId ?? "",
-          stripeSessionId: event.sessionId ?? "",
-          stripePaymentIntentId: event.paymentIntentId ?? "",
-          paidAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        logWebhookEvent("Stripe webhook entry update success", {
-          type: event.type,
-          entryId: event.entryId,
-          eventId: event.eventId ?? null,
-          sessionId: event.sessionId ?? null,
-          paymentIntentId: event.paymentIntentId ?? null,
-        });
-
-        await sendEntryEmailsAfterPayment(db, event);
-      } catch (error) {
-        logWebhookEvent("Stripe webhook entry update failed", {
-          type: event.type,
-          entryId: event.entryId,
-          eventId: event.eventId ?? null,
-          sessionId: event.sessionId ?? null,
-          paymentIntentId: event.paymentIntentId ?? null,
-          error,
-        });
-
-        return Response.json(
-          { received: false, error: "Entry payment status update failed." },
-          { status: 500 },
-        );
-      }
-    }
-
-    return Response.json({ received: true, type: event.type });
+    event = paymentService.constructStripeWebhookEvent(body, signature);
   } catch (error) {
-    logWebhookEvent("Stripe webhook handling failed", { error });
+    logWebhookEvent("Stripe webhook signature verification failed", { error });
 
     return Response.json(
       { received: false, error: "Stripe webhook handling failed." },
       { status: 400 },
+    );
+  }
+
+  const details = {
+    type: event.type,
+    entryId: event.entryId ?? null,
+    eventId: event.eventId ?? null,
+    sessionId: event.sessionId ?? null,
+    paymentIntentId: event.paymentIntentId ?? null,
+  };
+
+  logWebhookEvent("Stripe webhook received", details);
+
+  if (event.type !== "checkout.session.completed") {
+    return Response.json({ received: true, type: event.type });
+  }
+
+  if (!event.entryId || !event.sessionId) {
+    logWebhookEvent("Stripe webhook missing entryId", details);
+
+    return Response.json(
+      { received: false, error: "Checkout Session metadata.entryId is missing." },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const result = await confirmCardPayment({
+      sessionId: event.sessionId,
+      entryId: event.entryId,
+      eventId: event.eventId,
+      paymentStatus: event.paymentStatus,
+      amountTotal: event.amountTotal,
+      currency: event.currency,
+      paymentIntentId: event.paymentIntentId,
+    });
+
+    logWebhookEvent("Stripe webhook entry payment checked", {
+      ...details,
+      result: result.status,
+      reason: result.status === "mismatch" ? result.reason : undefined,
+    });
+
+    if (result.status === "mismatch") {
+      // 金額・通貨・申込との対応が一致しない決済は支払済みにしない。
+      // 再送しても結果は変わらないため 200 を返し、エントリーに記録した内容を管理者が確認する。
+      console.error("Stripe payment could not be matched to the entry", {
+        ...details,
+        reason: result.reason,
+      });
+    }
+
+    // 完了メールは、最初に支払済みにした処理だけが送る（再送では送らない）。
+    if (
+      (result.status === "confirmed" || result.status === "already_confirmed") &&
+      result.sendEmail
+    ) {
+      await deliverEntryEmails(event.entryId, event.sessionId);
+    }
+
+    return Response.json({ received: true, type: event.type, result: result.status });
+  } catch (error) {
+    logWebhookEvent("Stripe webhook entry update failed", { ...details, error });
+
+    // 一時的な失敗は Stripe の再送に任せる。
+    return Response.json(
+      { received: false, error: "Entry payment status update failed." },
+      { status: 500 },
     );
   }
 }

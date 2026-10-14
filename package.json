@@ -9,12 +9,19 @@
     "lint": "eslint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "emulators": "firebase emulators:start --only auth,firestore"
+    "emulators": "firebase emulators:start --only auth,firestore",
+    "local:emulators": "firebase emulators:start --config firebase.local.json --project demo-alma-copa --only auth,firestore",
+    "local:stubs": "node scripts/local/stub-server.mjs",
+    "local:seed": "node scripts/local/seed.mjs",
+    "local:app": "node scripts/local/run-app.mjs",
+    "local:app:stripe": "node scripts/local/run-app.mjs --real-stripe",
+    "local:stripe-listen": "node scripts/local/stripe-listen.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
     "@stripe/stripe-js": "^9.6.0",
     "firebase": "^12.13.0",
+    "firebase-admin": "^13.10.0",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",

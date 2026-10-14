@@ -42,3 +42,7 @@ next-env.d.ts
 php-mail-api/vendor/
 php-mail-api/config.php
 php-mail-api/vendor/
+
+# Firebase Emulator のログ（ローカル検証で生成される）
+firebase-debug.log
+firestore-debug.log

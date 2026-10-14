@@ -1,42 +1,10 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
-
-import { db } from "@/lib/firebase/client";
-import { collections } from "@/lib/firebase/collections";
-
-type PaymentCancelStatusProps = {
-  entryId?: string;
-};
-
-export function PaymentCancelStatus({ entryId }: PaymentCancelStatusProps) {
-  const [message, setMessage] = useState(
-    entryId ? "決済キャンセル状態を保存しています。" : "決済は完了していません。",
+// 決済をキャンセルして戻ってきた場合の案内。
+// 支払状態はサーバーだけが更新するため、この画面からは何も書き込まない。
+// 申込は未払いのまま残り、同じ内容でもう一度申し込むと決済をやり直せる。
+export function PaymentCancelStatus() {
+  return (
+    <p className="mt-3 leading-7 text-zinc-400">
+      決済は完了していません。お申し込みを続ける場合は、大会ページからもう一度お手続きください。
+    </p>
   );
-
-  useEffect(() => {
-    if (!entryId) {
-      return;
-    }
-
-    void updateDoc(doc(db, collections.entries, entryId), {
-      paymentStatus: "failed",
-      entryStatus: "cancelled",
-      paymentFailedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    })
-      .then(() => {
-        setMessage("決済状態を失敗として保存しました。");
-      })
-      .catch((error) => {
-        console.error("決済キャンセル状態の保存に失敗しました", {
-          entryId,
-          error,
-        });
-        setMessage("決済状態の保存に失敗しました。");
-      });
-  }, [entryId]);
-
-  return <p className="mt-3 text-zinc-400">{message}</p>;
 }

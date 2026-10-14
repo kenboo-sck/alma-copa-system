@@ -2,6 +2,7 @@ import "server-only";
 
 import type { AdminPermission, AdminUser } from "@/types/admin";
 
+import { getAuthEmulatorHost } from "@/lib/firebase/emulator";
 import { getFirestoreDocumentWithAuth } from "@/lib/firebase/firestore-rest";
 
 type FirebaseLookupResponse = {
@@ -34,8 +35,13 @@ function getBearerToken(request: Request) {
 }
 
 async function verifyFirebaseIdToken(idToken: string) {
+  // ローカル検証では、ログインに使った Auth Emulator に問い合わせる。
+  const emulatorHost = getAuthEmulatorHost();
+  const origin = emulatorHost
+    ? `http://${emulatorHost}/identitytoolkit.googleapis.com`
+    : "https://identitytoolkit.googleapis.com";
   const response = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(getFirebaseApiKey())}`,
+    `${origin}/v1/accounts:lookup?key=${encodeURIComponent(getFirebaseApiKey())}`,
     {
       method: "POST",
       headers: {

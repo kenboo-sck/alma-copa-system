@@ -9,10 +9,14 @@ import { z } from "zod";
 import { CalendarIcon, ClockIcon, LocationIcon, TrophyIcon } from "@/components/icons";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import { athleteInputSchema } from "@/lib/entries/entry-athlete-schema";
+import { emptyAthleteInput, sanitizeAthleteInput } from "@/lib/entries/entry-divisions";
 import { maskEmail } from "@/lib/entries/entry-validation";
 import {
   clearEntryFlowStorage,
-  getEntryDraftStorageKey as buildEntryDraftStorageKey,
+  readEntryDraft,
+  saveEntryDraft,
+  type EntryDraftValues,
 } from "@/lib/entries/entry-storage";
 import {
   formatDate,
@@ -26,18 +30,10 @@ import {
 } from "@/features/events/public-event-utils";
 import type { EntryType } from "@/types/entry";
 
-const athleteSchema = z.object({
-  name: z.string().min(1, "氏名を入力してください。").max(50),
-  kana: z.string().min(1, "フリガナを入力してください。").max(80),
-  gender: z.string().min(1, "性別を選択してください。"),
-  birthDate: z.string().min(1, "生年月日を入力してください。"),
-  category: z.string().min(1, "カテゴリを入力してください。").max(120),
-  ageCategory: z.string().min(1, "年齢カテゴリーを選択してください。"),
-  weightClass: z.string().min(1, "階級を選択してください。"),
-  openClass: z.string().min(1, "無差別級を選択してください。"),
-});
+import { AthleteFields, inputClassName } from "./entry-athlete-fields";
+import { EntryFeeBreakdown } from "./entry-fee-breakdown";
 
-const individualEntrySchema = athleteSchema.extend({
+const individualEntrySchema = z.object({
   email: z.email("メールアドレスを正しく入力してください。"),
   phone: z.string().min(10, "電話番号を入力してください。").max(20),
   gym: z
@@ -48,6 +44,7 @@ const individualEntrySchema = athleteSchema.extend({
   prefecture: z.string().min(1, "都道府県を入力してください。").max(20),
   city: z.string().min(1, "市区町村を入力してください。").max(80),
   addressLine: z.string().min(1, "番地・建物名を入力してください。").max(160),
+  athletes: z.array(athleteInputSchema).length(1),
 });
 
 const representativeEntrySchema = z.object({
@@ -65,31 +62,17 @@ const representativeEntrySchema = z.object({
     .string()
     .min(1, "番地・建物名を入力してください。")
     .max(160),
-  athletes: z.array(athleteSchema).min(1, "選手を1名以上追加してください。"),
+  athletes: z.array(athleteInputSchema).min(1, "選手を1名以上追加してください。"),
 });
 
-type AthleteValues = z.infer<typeof athleteSchema>;
-type EntryCheckoutValues = z.infer<typeof individualEntrySchema> &
-  z.infer<typeof representativeEntrySchema>;
+type EntryCheckoutValues = EntryDraftValues;
 
 type EntryCheckoutFormProps = {
   eventId: string;
   entryType: EntryType;
 };
 
-const defaultAthleteValues: AthleteValues = {
-  name: "",
-  kana: "",
-  gender: "",
-  birthDate: "",
-  category: "",
-  ageCategory: "",
-  weightClass: "",
-  openClass: "",
-};
-
 const defaultValues: EntryCheckoutValues = {
-  ...defaultAthleteValues,
   email: "",
   phone: "",
   gym: "",
@@ -105,38 +88,8 @@ const defaultValues: EntryCheckoutValues = {
   representativePrefecture: "",
   representativeCity: "",
   representativeAddressLine: "",
-  athletes: [defaultAthleteValues],
+  athletes: [emptyAthleteInput],
 };
-
-const categoryOptions = ["エキスパート", "アドバンス", "ビギナー"];
-
-const ageCategoryOptions = [
-  "キッズ（同じ年齢で試合組みます。）",
-  "ジュベニウ 15歳から17歳",
-  "アダルト 18歳から29歳",
-  "マスター1 30歳から35歳",
-  "マスター2 36歳から40歳",
-  "マスター3 41歳から45歳",
-  "マスター4 46歳から50歳",
-  "マスター5 51歳以上",
-];
-
-const weightClassOptions = [
-  "キッズ（体重手入力）",
-  "ルースター",
-  "ライトフェザー",
-  "フェザー",
-  "ライト",
-  "ミドル",
-  "ミディアムヘビー",
-  "ヘビー",
-  "スーパーヘビー",
-];
-
-const inputClassName =
-  "h-[52px] w-full rounded-md border border-white/10 bg-black/55 px-4 text-sm text-white outline-none transition placeholder:text-zinc-600 hover:border-alma-gold/35 focus:border-alma-gold focus:bg-black/70 focus:shadow-[0_0_0_3px_rgba(214,173,69,0.13)]";
-
-const selectClassName = `${inputClassName} appearance-none pr-11`;
 
 function FormSection({
   eyebrow,
@@ -160,70 +113,6 @@ function FormSection({
       </div>
       {children}
     </section>
-  );
-}
-
-function SelectArrow() {
-  return (
-    <span className="pointer-events-none absolute right-4 top-1/2 h-2.5 w-2.5 -translate-y-1/2 rotate-45 border-b border-r border-alma-gold" />
-  );
-}
-
-type EntryDraft = {
-  eventId: string;
-  entryType: EntryType;
-  values: EntryCheckoutValues;
-  savedAt: string;
-};
-
-function readEntryDraft(eventId: string): EntryDraft | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const raw = window.sessionStorage.getItem(buildEntryDraftStorageKey(eventId));
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<EntryDraft> | null;
-
-    if (
-      !parsed ||
-      parsed.eventId !== eventId ||
-      (parsed.entryType !== "individual" && parsed.entryType !== "representative") ||
-      typeof parsed.savedAt !== "string" ||
-      !parsed.values
-    ) {
-      return null;
-    }
-
-    return parsed as EntryDraft;
-  } catch {
-    return null;
-  }
-}
-
-function saveEntryDraft(
-  eventId: string,
-  entryType: EntryType,
-  values: EntryCheckoutValues,
-) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  const draft: EntryDraft = {
-    eventId,
-    entryType,
-    values,
-    savedAt: new Date().toISOString(),
-  };
-
-  window.sessionStorage.setItem(
-    buildEntryDraftStorageKey(eventId),
-    JSON.stringify(draft),
   );
 }
 
@@ -331,8 +220,13 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
       ...defaultValues,
       ...draft.values,
       athletes:
-        draft.values.athletes?.length > 0
-          ? draft.values.athletes
+        draft.values.athletes.length > 0
+          ? draft.values.athletes.map((athlete) => ({
+              ...emptyAthleteInput,
+              ...athlete,
+              gi: { ...emptyAthleteInput.gi, ...athlete.gi },
+              nogi: { ...emptyAthleteInput.nogi, ...athlete.nogi },
+            }))
           : defaultValues.athletes,
     });
   }, [entryType, eventId, reset]);
@@ -425,22 +319,6 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  function getValidationApplicants(values: EntryCheckoutValues) {
-    if (entryType === "representative") {
-      return values.athletes.map((athlete) => ({
-        birthDate: athlete.birthDate,
-        ageCategory: athlete.ageCategory,
-      }));
-    }
-
-    return [
-      {
-        birthDate: values.birthDate,
-        ageCategory: values.ageCategory,
-      },
-    ];
-  }
-
   function getValidationEmail(values: EntryCheckoutValues) {
     return entryType === "representative" ? values.representativeEmail : values.email;
   }
@@ -473,6 +351,12 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
 
     setError(null);
 
+    // 出場しない部門・対象外の項目を取り除いてから検証・保存する。
+    const sanitizedValues: EntryCheckoutValues = {
+      ...values,
+      athletes: values.athletes.map(sanitizeAthleteInput),
+    };
+
     try {
       const response = await fetch("/api/entries/validate", {
         method: "POST",
@@ -481,9 +365,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
         },
         body: JSON.stringify({
           eventId,
-          email: getValidationEmail(values),
+          email: getValidationEmail(sanitizedValues),
           entryType,
-          applicants: getValidationApplicants(values),
+          athletes: sanitizedValues.athletes,
         }),
       });
 
@@ -516,7 +400,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
         );
       }
 
-      saveEntryDraft(eventId, entryType, values);
+      saveEntryDraft(eventId, entryType, sanitizedValues);
       setToast("確認ページへ移動します。");
       window.location.href = `/events/${eventId}/confirm`;
     } catch (caughtError) {
@@ -535,11 +419,9 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
     entryType === "representative" ? "REPRESENTATIVE ENTRY" : "INDIVIDUAL ENTRY";
   const entryTypeTitle =
     entryType === "representative" ? "代表者情報入力" : "選手情報入力";
+
   const currentPricing = event ? getCurrentEntryFee(event) : null;
   const watchedAthletes = useWatch({ control, name: "athletes" }) ?? [];
-  const displayAthleteCount =
-    entryType === "representative" ? Math.max(watchedAthletes.length, 1) : 1;
-  const displayTotalAmount = (currentPricing?.entryFee ?? 0) * displayAthleteCount;
 
   return (
     <main className="relative left-1/2 w-screen -translate-x-1/2 overflow-hidden bg-[#050505] text-white">
@@ -662,7 +544,17 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
           <div className="space-y-10">
             {entryType === "individual" ? (
               <>
-                <FormSection eyebrow="Basic Info" title="基本情報">
+                <FormSection eyebrow="Athlete Info" title="選手情報">
+                  <AthleteFields
+                    index={0}
+                    control={control}
+                    register={register}
+                    setValue={setValue}
+                    errors={errors}
+                  />
+                </FormSection>
+
+                <FormSection eyebrow="Contact" title="所属・連絡先">
                   <div className="grid gap-5 sm:grid-cols-2">
                     <label className="space-y-2">
                       <span className="text-sm font-semibold text-zinc-200">
@@ -676,38 +568,6 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                       {errors.gym ? (
                         <span className="text-xs text-red-300">
                           {errors.gym.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">
-                        氏名（漢字）
-                      </span>
-                      <input
-                        {...register("name")}
-                        placeholder="山田 太郎"
-                        className={inputClassName}
-                      />
-                      {errors.name ? (
-                        <span className="text-xs text-red-300">
-                          {errors.name.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">
-                        氏名（カタカナ）
-                      </span>
-                      <input
-                        {...register("kana")}
-                        placeholder="ヤマダ タロウ"
-                        className={inputClassName}
-                      />
-                      {errors.kana ? (
-                        <span className="text-xs text-red-300">
-                          {errors.kana.message}
                         </span>
                       ) : null}
                     </label>
@@ -820,148 +680,6 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                         </span>
                       ) : null}
                     </label>
-                  </div>
-                </FormSection>
-
-                <FormSection eyebrow="Athlete Info" title="選手情報">
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">性別</span>
-                      <span className="relative block">
-                        <select {...register("gender")} className={selectClassName}>
-                          <option value="">性別を選択</option>
-                          <option value="male">男性</option>
-                          <option value="female">女性</option>
-                        </select>
-                        <SelectArrow />
-                      </span>
-                      {errors.gender ? (
-                        <span className="text-xs text-red-300">
-                          {errors.gender.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">
-                        生年月日
-                      </span>
-                      <input
-                        type="date"
-                        {...register("birthDate")}
-                        className={`${inputClassName} scheme-dark`}
-                      />
-                      {errors.birthDate ? (
-                        <span className="text-xs text-red-300">
-                          {errors.birthDate.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">
-                        カテゴリー
-                      </span>
-                      <span className="relative block">
-                        <select {...register("category")} className={selectClassName}>
-                          <option value="">カテゴリーを選択</option>
-                          {categoryOptions.map((category) => (
-                            <option key={category} value={category}>
-                              {category}
-                            </option>
-                          ))}
-                        </select>
-                        <SelectArrow />
-                      </span>
-                      {errors.category ? (
-                        <span className="text-xs text-red-300">
-                          {errors.category.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">
-                        年齢カテゴリー
-                      </span>
-                      <span className="relative block">
-                        <select
-                          {...register("ageCategory")}
-                          className={selectClassName}
-                        >
-                          <option value="">年齢カテゴリーを選択</option>
-                          {ageCategoryOptions.map((ageCategory) => (
-                            <option key={ageCategory} value={ageCategory}>
-                              {ageCategory}
-                            </option>
-                          ))}
-                        </select>
-                        <SelectArrow />
-                      </span>
-                      {errors.ageCategory ? (
-                        <span className="text-xs text-red-300">
-                          {errors.ageCategory.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <label className="space-y-2">
-                      <span className="text-sm font-semibold text-zinc-200">階級</span>
-                      <span className="relative block">
-                        <select
-                          {...register("weightClass")}
-                          className={selectClassName}
-                        >
-                          <option value="">階級を選択</option>
-                          {weightClassOptions.map((weightClass) => (
-                            <option key={weightClass} value={weightClass}>
-                              {weightClass}
-                            </option>
-                          ))}
-                        </select>
-                        <SelectArrow />
-                      </span>
-                      {errors.weightClass ? (
-                        <span className="text-xs text-red-300">
-                          {errors.weightClass.message}
-                        </span>
-                      ) : null}
-                    </label>
-
-                    <fieldset className="space-y-3 sm:col-span-2">
-                      <legend className="text-sm font-semibold text-zinc-200">
-                        無差別級（オープンクラス）
-                      </legend>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="group flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
-                          <span className="text-sm font-semibold text-white">
-                            参加する
-                          </span>
-                          <input
-                            type="radio"
-                            value="yes"
-                            {...register("openClass")}
-                            className="h-4 w-4 accent-alma-gold"
-                          />
-                        </label>
-                        <label className="group flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
-                          <span className="text-sm font-semibold text-white">
-                            参加しない
-                          </span>
-                          <input
-                            type="radio"
-                            value="no"
-                            {...register("openClass")}
-                            className="h-4 w-4 accent-alma-gold"
-                          />
-                        </label>
-                      </div>
-                      {errors.openClass ? (
-                        <span className="text-xs text-red-300">
-                          {errors.openClass.message}
-                        </span>
-                      ) : null}
-                    </fieldset>
                   </div>
                 </FormSection>
               </>
@@ -1138,193 +856,19 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                           </button>
                         </div>
 
-                        <div className="grid gap-5 sm:grid-cols-2">
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              氏名（漢字）
-                            </span>
-                            <input
-                              {...register(`athletes.${index}.name`)}
-                              placeholder="山田 太郎"
-                              className={inputClassName}
-                            />
-                            {errors.athletes?.[index]?.name ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.name?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              氏名（カタカナ）
-                            </span>
-                            <input
-                              {...register(`athletes.${index}.kana`)}
-                              placeholder="ヤマダ タロウ"
-                              className={inputClassName}
-                            />
-                            {errors.athletes?.[index]?.kana ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.kana?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              性別
-                            </span>
-                            <span className="relative block">
-                              <select
-                                {...register(`athletes.${index}.gender`)}
-                                className={selectClassName}
-                              >
-                                <option value="">性別を選択</option>
-                                <option value="male">男性</option>
-                                <option value="female">女性</option>
-                              </select>
-                              <SelectArrow />
-                            </span>
-                            {errors.athletes?.[index]?.gender ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.gender?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              生年月日
-                            </span>
-                            <input
-                              type="date"
-                              {...register(`athletes.${index}.birthDate`)}
-                              className={`${inputClassName} scheme-dark`}
-                            />
-                            {errors.athletes?.[index]?.birthDate ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.birthDate?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              カテゴリー
-                            </span>
-                            <span className="relative block">
-                              <select
-                                {...register(`athletes.${index}.category`)}
-                                className={selectClassName}
-                              >
-                                <option value="">カテゴリーを選択</option>
-                                {categoryOptions.map((category) => (
-                                  <option key={category} value={category}>
-                                    {category}
-                                  </option>
-                                ))}
-                              </select>
-                              <SelectArrow />
-                            </span>
-                            {errors.athletes?.[index]?.category ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.category?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              年齢カテゴリー
-                            </span>
-                            <span className="relative block">
-                              <select
-                                {...register(`athletes.${index}.ageCategory`)}
-                                className={selectClassName}
-                              >
-                                <option value="">年齢カテゴリーを選択</option>
-                                {ageCategoryOptions.map((ageCategory) => (
-                                  <option key={ageCategory} value={ageCategory}>
-                                    {ageCategory}
-                                  </option>
-                                ))}
-                              </select>
-                              <SelectArrow />
-                            </span>
-                            {errors.athletes?.[index]?.ageCategory ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.ageCategory?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <label className="space-y-2">
-                            <span className="text-sm font-semibold text-zinc-200">
-                              階級
-                            </span>
-                            <span className="relative block">
-                              <select
-                                {...register(`athletes.${index}.weightClass`)}
-                                className={selectClassName}
-                              >
-                                <option value="">階級を選択</option>
-                                {weightClassOptions.map((weightClass) => (
-                                  <option key={weightClass} value={weightClass}>
-                                    {weightClass}
-                                  </option>
-                                ))}
-                              </select>
-                              <SelectArrow />
-                            </span>
-                            {errors.athletes?.[index]?.weightClass ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.weightClass?.message}
-                              </span>
-                            ) : null}
-                          </label>
-
-                          <fieldset className="space-y-3 sm:col-span-2">
-                            <legend className="text-sm font-semibold text-zinc-200">
-                              無差別級（オープンクラス）
-                            </legend>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                              <label className="flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
-                                <span className="text-sm font-semibold text-white">
-                                  参加する
-                                </span>
-                                <input
-                                  type="radio"
-                                  value="yes"
-                                  {...register(`athletes.${index}.openClass`)}
-                                  className="h-4 w-4 accent-alma-gold"
-                                />
-                              </label>
-                              <label className="flex min-h-[52px] cursor-pointer items-center justify-between rounded-md border border-white/10 bg-black/45 px-4 transition hover:border-alma-gold/40">
-                                <span className="text-sm font-semibold text-white">
-                                  参加しない
-                                </span>
-                                <input
-                                  type="radio"
-                                  value="no"
-                                  {...register(`athletes.${index}.openClass`)}
-                                  className="h-4 w-4 accent-alma-gold"
-                                />
-                              </label>
-                            </div>
-                            {errors.athletes?.[index]?.openClass ? (
-                              <span className="text-xs text-red-300">
-                                {errors.athletes[index]?.openClass?.message}
-                              </span>
-                            ) : null}
-                          </fieldset>
-                        </div>
+                        <AthleteFields
+                          index={index}
+                          control={control}
+                          register={register}
+                          setValue={setValue}
+                          errors={errors}
+                        />
                       </div>
                     ))}
 
                     <button
                       type="button"
-                      onClick={() => appendAthlete(defaultAthleteValues)}
+                      onClick={() => appendAthlete(emptyAthleteInput)}
                       className="inline-flex min-h-[48px] w-full items-center justify-center rounded-md border border-alma-gold/50 bg-black/35 px-5 py-3 text-sm font-black text-alma-gold transition hover:bg-alma-gold hover:text-black sm:w-auto"
                     >
                       選手を追加
@@ -1340,27 +884,16 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                   <p className="text-xs font-black uppercase tracking-[0.28em] text-alma-gold">
                     Entry Summary
                   </p>
-                  {entryType === "representative" ? (
-                    <>
-                      <p className="mt-2 text-3xl font-black text-white">
-                        合計: {displayTotalAmount.toLocaleString("ja-JP")}円
-                      </p>
-                      <p className="mt-2 text-base font-semibold text-zinc-200">
-                        エントリー費{" "}
-                        {(currentPricing?.entryFee ?? 0).toLocaleString("ja-JP")}円 ×{" "}
-                        {displayAthleteCount}名
-                      </p>
-                    </>
-                  ) : (
-                    <p className="mt-2 text-3xl font-black text-white">
-                      合計: {displayTotalAmount.toLocaleString("ja-JP")}円
-                    </p>
-                  )}
                   <p className="mt-1 text-sm font-semibold text-zinc-400">
-                    {currentPricing?.label ?? "価格を確認中"} /
-                    確認ページで内容を見直してから決済します
+                    料金内訳 / 確認ページで内容を見直してから決済します
                   </p>
                 </div>
+                <EntryFeeBreakdown
+                  entryFee={currentPricing?.entryFee ?? 0}
+                  priceLabel={currentPricing?.label ?? "価格を確認中"}
+                  athletes={watchedAthletes}
+                  showAthleteHeadings={entryType === "representative"}
+                />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"

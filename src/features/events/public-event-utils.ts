@@ -1,5 +1,9 @@
-import { Timestamp, type DocumentData } from "firebase/firestore";
+import type { DocumentData } from "firebase/firestore";
 
+import {
+  getEventPaymentSettings,
+  type EventPaymentSettings,
+} from "@/lib/payments/payment-methods";
 import type { EventStatus } from "@/types/event";
 
 export type PublicEvent = {
@@ -24,6 +28,8 @@ export type PublicEvent = {
   lateStartAt: Date | null;
   lateEndAt: Date | null;
   status: EventStatus;
+  // 大会ごとの支払設定。設定がない既存の大会はカードのみ。
+  paymentSettings: EventPaymentSettings;
   aboutSection: {
     enabled: boolean;
     concept: string;
@@ -51,8 +57,15 @@ export function toCssUrl(imageUrl: string) {
 }
 
 export function toDate(value: unknown): Date | null {
-  if (value instanceof Timestamp) {
-    return value.toDate();
+  // API ルートは firebase/firestore/lite で大会を読むため、Timestamp のクラスが
+  // firebase/firestore のものと一致しない。instanceof では判定せず、toDate の有無で判定する。
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate();
   }
 
   if (value instanceof Date) {
@@ -102,6 +115,7 @@ export function mapPublicEvent(id: string, data: DocumentData): PublicEvent {
     lateEndAt: toDate(data.lateEndAt),
     status:
       data.status === "published" || data.status === "closed" ? data.status : "draft",
+    paymentSettings: getEventPaymentSettings(data),
     aboutSection: {
       enabled: aboutSection.enabled === true,
       concept: typeof aboutSection.concept === "string" ? aboutSection.concept : "",

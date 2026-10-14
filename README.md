@@ -59,10 +59,17 @@ Stripe Checkout、Firestore 保存、決済前の重複チェック、完了メ�
 - `ADMIN_NOTIFICATION_EMAIL`
 - `MAIL_FROM_ADDRESS`
 
-### 補足
+### Firebase Admin SDK（サーバー側）
 
-決済前の重複チェックと大会情報の読み取りは、Firebase Admin SDK ではなく公開用の Firebase Web SDK で行います。  
-そのため、このエントリー処理では `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` は不要です。
+エントリーの保存、参加費の確定、支払状態の更新（Stripe 決済の確定、振込入金・現金受領の記録）は、
+API ルートが Firebase Admin SDK で行います。Firestore ルールでは、一般ユーザーによるエントリーの
+直接の読み書きをすべて拒否しています。次のいずれかを設定してください（値はコードや Git に含めないでください）。
+
+- `FIREBASE_SERVICE_ACCOUNT_JSON`（サービスアカウントキーの JSON 全文。base64 でも可）
+- または `FIREBASE_ADMIN_PROJECT_ID` / `FIREBASE_ADMIN_CLIENT_EMAIL` / `FIREBASE_ADMIN_PRIVATE_KEY`
+
+ローカルで Firestore Emulator を使う場合は `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080` を設定すると、
+認証情報なしで Emulator に接続します。
 
 ## 管理者ログイン
 

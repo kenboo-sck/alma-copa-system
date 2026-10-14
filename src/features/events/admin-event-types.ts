@@ -1,3 +1,4 @@
+import type { EventPaymentSettings } from "@/lib/payments/payment-methods";
 import type { EventStatus } from "@/types/event";
 
 export type AdminEvent = {
@@ -18,6 +19,8 @@ export type AdminEvent = {
   lateStartAt: Date | null;
   lateEndAt: Date | null;
   status: EventStatus;
+  // 支払設定。設定がない既存の大会はカードのみ。
+  paymentSettings: EventPaymentSettings;
   imageUrl: string;
   imagePath: string;
   aboutSection: {
@@ -50,6 +53,15 @@ export type EventFormValues = {
   lateStartAt: string;
   lateEndAt: string;
   status: EventStatus;
+  // 支払方法（複数選択。少なくとも 1 つ有効にする）。
+  paymentCard: boolean;
+  paymentBankTransfer: boolean;
+  paymentCash: boolean;
+  bankAccountInfo: string;
+  bankNote: string;
+  // 振込期限日（日本時間の "YYYY-MM-DD"。当日中を期限とする）。
+  bankDueDate: string;
+  cashNote: string;
   aboutSection: {
     enabled: "true" | "false";
     concept: string;

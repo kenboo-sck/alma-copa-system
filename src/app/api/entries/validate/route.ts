@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { doc, getDoc } from "firebase/firestore/lite";
 
+import { athleteInputSchema } from "@/lib/entries/entry-athlete-schema";
+import {
+  calculateAgeOnDate,
+  normalizeAthlete,
+  type NormalizedAthlete,
+} from "@/lib/entries/entry-divisions";
 import {
   buildAgeCategoryFieldErrors,
   mapZodIssuesToFieldErrors,
@@ -17,16 +23,11 @@ import {
 
 export const runtime = "nodejs";
 
-const validationApplicantSchema = z.object({
-  birthDate: z.string().min(1, "生年月日を入力してください。"),
-  ageCategory: z.string().min(1, "年齢カテゴリーを選択してください。"),
-});
-
 const validationSchema = z.object({
   eventId: z.string().min(1, "大会を選択してください。"),
   email: z.email("メールアドレスの形式が正しくありません。"),
   entryType: z.enum(["individual", "representative"]),
-  applicants: z.array(validationApplicantSchema).min(1, "選手情報を入力してください。"),
+  athletes: z.array(athleteInputSchema).min(1, "選手情報を入力してください。"),
 });
 
 type ValidationPayload =
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
     eventId: typeof json?.eventId === "string" ? json.eventId : "",
     entryType: json?.entryType === "representative" ? "representative" : "individual",
     email: typeof json?.email === "string" ? json.email : "",
-    applicants: Array.isArray(json?.applicants) ? json.applicants : [],
+    applicants: Array.isArray(json?.athletes) ? json.athletes : [],
     entryId: typeof json?.entryId === "string" ? json.entryId : undefined,
   });
 
@@ -119,7 +120,8 @@ export async function POST(request: Request) {
         ? "メールアドレスの形式が正しくありません。"
         : fieldErrors.some((item) => item.field.includes("birthDate"))
           ? "生年月日が未入力です。"
-          : "入力内容に不備があります。必須項目を確認してください。",
+          : (fieldErrors.find((item) => item.code === "custom")?.message ??
+            "入力内容に不備があります。必須項目を確認してください。"),
       fieldErrors,
     );
 
@@ -138,8 +140,7 @@ export async function POST(request: Request) {
         [
           {
             field: "form",
-            message:
-              "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
+            message: "現在、サーバー設定の確認中です。時間をおいて再度お試しください。",
             code: "firebase_public_configuration_missing",
           },
         ],
@@ -155,7 +156,9 @@ export async function POST(request: Request) {
     }
 
     const db = getPublicFirestore();
-    const eventSnapshot = await getDoc(doc(db, collections.events, parsed.data.eventId));
+    const eventSnapshot = await getDoc(
+      doc(db, collections.events, parsed.data.eventId),
+    );
 
     if (!eventSnapshot.exists()) {
       const failure = buildFailure(404, "event_lookup", "大会が見つかりません。", [
@@ -224,13 +227,12 @@ export async function POST(request: Request) {
       return Response.json(failure, { status: failure.status });
     }
 
-    const applicants = parsed.data.applicants.map((applicant) => ({
-      birthDate: applicant.birthDate,
-      ageCategory: applicant.ageCategory,
-    }));
+    const athletes = parsed.data.athletes
+      .map((athlete) => normalizeAthlete(athlete))
+      .filter((athlete): athlete is NormalizedAthlete => athlete !== null);
 
     const ageFieldErrors = buildAgeCategoryFieldErrors(
-      applicants,
+      athletes,
       eventDate,
       parsed.data.entryType,
     );
@@ -239,7 +241,7 @@ export async function POST(request: Request) {
       const failure = buildFailure(
         400,
         "age_category_check",
-        "生年月日から計算した年齢と、選択された年齢カテゴリーが一致していません。年齢カテゴリーをご確認ください。",
+        ageFieldErrors[0].message,
         ageFieldErrors,
       );
 
@@ -256,10 +258,8 @@ export async function POST(request: Request) {
       ok: true,
       normalizedEmail: parsed.data.email.trim().toLowerCase(),
       eventDateIso: eventDate.toISOString(),
-      calculatedAges: applicants.map((applicant) =>
-        applicant.birthDate
-          ? sanitizeCalculatedAge(applicant.birthDate, eventDate)
-          : null,
+      calculatedAges: athletes.map((athlete) =>
+        calculateAgeOnDate(athlete.birthDate, eventDate),
       ),
     };
 
@@ -288,31 +288,4 @@ export async function POST(request: Request) {
 
     return Response.json(failure, { status: failure.status });
   }
-}
-
-function sanitizeCalculatedAge(birthDate: string, eventDate: Date) {
-  const parts = birthDate.split("-").map((part) => Number(part));
-  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
-    return null;
-  }
-
-  const [year, month, day] = parts;
-  const birth = new Date(year, month - 1, day);
-  if (
-    birth.getFullYear() !== year ||
-    birth.getMonth() !== month - 1 ||
-    birth.getDate() !== day
-  ) {
-    return null;
-  }
-
-  let age = eventDate.getFullYear() - birth.getFullYear();
-  if (
-    eventDate.getMonth() < birth.getMonth() ||
-    (eventDate.getMonth() === birth.getMonth() && eventDate.getDate() < birth.getDate())
-  ) {
-    age -= 1;
-  }
-
-  return age >= 0 ? age : null;
 }

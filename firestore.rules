@@ -50,315 +50,23 @@ service cloud.firestore {
         && (!data.keys().hasAny(["updatedAt"]) || data.updatedAt == request.time);
     }
 
-    function isPublishedEvent(eventId) {
-      return exists(/databases/$(database)/documents/events/$(eventId))
-        && get(/databases/$(database)/documents/events/$(eventId)).data.status == "published"
-        && (
-          !get(/databases/$(database)/documents/events/$(eventId)).data.keys().hasAny(["deletedAt"])
-          || get(/databases/$(database)/documents/events/$(eventId)).data.deletedAt == null
-        );
-    }
-
-    function eventData(eventId) {
-      return get(/databases/$(database)/documents/events/$(eventId)).data;
-    }
-
-    function publicEntryPriceAllowed(data) {
-      return data.entryFee is number
-        && data.entryFee > 0
-        && data.priceType in ["early", "regular", "late"]
-        && data.athleteCount is number
-        && data.athleteCount >= 1
-        && data.subtotalAmount == data.entryFee * data.athleteCount
-        && data.discountAmount == 0
-        && data.totalAmount == data.entryFee * data.athleteCount
-        && (
-          (
-            data.priceType == "early"
-            && eventData(data.eventId).earlyBirdPrice == data.entryFee
-            && request.time >= eventData(data.eventId).earlyBirdStartAt
-            && request.time <= eventData(data.eventId).earlyBirdEndAt
-          )
-          || (
-            data.priceType == "regular"
-            && eventData(data.eventId).regularPrice == data.entryFee
-            && request.time >= eventData(data.eventId).regularStartAt
-            && request.time <= eventData(data.eventId).regularEndAt
-          )
-          || (
-            data.priceType == "late"
-            && eventData(data.eventId).latePrice == data.entryFee
-            && request.time >= eventData(data.eventId).lateStartAt
-            && request.time <= eventData(data.eventId).lateEndAt
-          )
-        );
-    }
-
-    function entryKeysAllowed(data) {
-      return data.keys().hasOnly([
-        "eventId",
-        "eventTitle",
-        "entryType",
-        "entryStatus",
-        "paymentStatus",
-        "paymentProvider",
-        "name",
-        "kana",
-        "email",
-        "normalizedEmail",
-        "phone",
-        "gender",
-        "birthDate",
-        "gym",
-        "postalCode",
-        "prefecture",
-        "city",
-        "addressLine",
-        "category",
-        "ageCategory",
-        "weightClass",
-        "openClass",
-        "athlete",
-        "representative",
-        "athletes",
-        "entryFee",
-        "priceType",
-        "athleteCount",
-        "stripeSessionId",
-        "stripeCheckoutSessionId",
-        "stripePaymentIntentId",
+    // エントリーの保存・料金の確定・支払状態の更新は、サーバー（API ルート）が
+    // Firebase Admin SDK で行う（src/lib/entries/entry-server.ts）。Admin SDK は
+    // このルールの対象外のため、ここでは一般ユーザーからの直接の読み書きをすべて拒否する。
+    //
+    // 管理者がブラウザから直接更新できるのは、受付・計量・ゼッケンなど当日運営の項目だけ。
+    // 支払状態・金額・申込内容・入金確認の記録は、管理者であっても直接は変更できない
+    // （入金の記録は /api/admin/entries/confirm-payment を通す）。
+    function adminEntryUpdateAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         "receptionStatus",
+        "checkedInAt",
         "weighInStatus",
+        "weighInAt",
         "bibNumber",
         "bracketPosition",
-        "checkedInAt",
-        "weighInAt",
-        "participantCount",
-        "categoryEntryCount",
-        "subtotalAmount",
-        "discountAmount",
-        "totalAmount",
-        "currency",
-        "createdAt",
-        "updatedAt",
-        "paidAt",
-        "paymentFailedAt"
+        "updatedAt"
       ]);
-    }
-
-    function publicEntryRequiredKeys(data) {
-      return data.keys().hasAll([
-        "eventId",
-        "entryType",
-        "name",
-        "kana",
-        "email",
-        "normalizedEmail",
-        "phone",
-        "gender",
-        "paymentStatus",
-        "entryStatus",
-        "postalCode",
-        "prefecture",
-        "city",
-        "addressLine",
-        "category",
-        "ageCategory",
-        "weightClass",
-        "openClass",
-        "entryFee",
-        "priceType",
-        "athleteCount"
-      ]);
-    }
-
-    // 一般ユーザー・未ログインユーザーはエントリー申込の作成のみ許可する。
-    function publicEntryCreateAllowed() {
-      return entryKeysAllowed(request.resource.data)
-        && publicEntryRequiredKeys(request.resource.data)
-        && isPublishedEvent(request.resource.data.eventId)
-        && request.resource.data.eventTitle == get(/databases/$(database)/documents/events/$(request.resource.data.eventId)).data.title
-        && request.resource.data.eventId is string
-        && request.resource.data.entryType in ["individual", "representative"]
-        && request.resource.data.name is string
-        && request.resource.data.kana is string
-        && request.resource.data.email is string
-        && request.resource.data.normalizedEmail is string
-        && request.resource.data.phone is string
-        && request.resource.data.gender is string
-        && request.resource.data.birthDate is timestamp
-        && request.resource.data.gym is string
-        && request.resource.data.postalCode is string
-        && request.resource.data.prefecture is string
-        && request.resource.data.city is string
-        && request.resource.data.addressLine is string
-        && request.resource.data.category is string
-        && request.resource.data.ageCategory is string
-        && request.resource.data.weightClass is string
-        && request.resource.data.openClass in ["yes", "no"]
-        && request.resource.data.athleteCount is number
-        && (
-          (
-            request.resource.data.entryType == "individual"
-            && request.resource.data.athleteCount == 1
-            && request.resource.data.athlete is map
-            && request.resource.data.representative == null
-            && request.resource.data.athletes is list
-            && request.resource.data.athletes.size() == 0
-            && request.resource.data.participantCount == 1
-            && request.resource.data.categoryEntryCount == 1
-          )
-          || (
-            request.resource.data.entryType == "representative"
-            && request.resource.data.athleteCount == request.resource.data.athletes.size()
-            && request.resource.data.athlete == null
-            && request.resource.data.representative is map
-            && request.resource.data.athletes is list
-            && request.resource.data.athletes.size() >= 1
-            && request.resource.data.participantCount == request.resource.data.athletes.size()
-            && request.resource.data.categoryEntryCount == request.resource.data.athletes.size()
-          )
-        )
-        && request.resource.data.paymentStatus == "pending"
-        && request.resource.data.entryStatus == "pending_payment"
-        && request.resource.data.paymentProvider == "stripe"
-        && request.resource.data.receptionStatus == "not_checked_in"
-        && request.resource.data.weighInStatus == "not_weighed"
-        && request.resource.data.bibNumber == ""
-        && request.resource.data.bracketPosition == ""
-        && request.resource.data.entryFee is number
-        && request.resource.data.entryFee > 0
-        && request.resource.data.priceType in ["early", "regular", "late"]
-        && request.resource.data.subtotalAmount == request.resource.data.entryFee * request.resource.data.athleteCount
-        && request.resource.data.discountAmount == 0
-        && request.resource.data.totalAmount == request.resource.data.entryFee * request.resource.data.athleteCount
-        && request.resource.data.currency == "JPY";
-    }
-
-    // 開発テスト用:
-    // 決済完了 / キャンセル時の paymentStatus 更新のみ許可する。
-    function publicEntryPaymentUpdateAllowed() {
-      return entryKeysAllowed(request.resource.data)
-        && isPublishedEvent(resource.data.eventId)
-        && request.resource.data.eventId == resource.data.eventId
-        && request.resource.data.eventTitle == resource.data.eventTitle
-        && request.resource.data.entryType == resource.data.entryType
-        && request.resource.data.name == resource.data.name
-        && request.resource.data.kana == resource.data.kana
-        && request.resource.data.email == resource.data.email
-        && request.resource.data.normalizedEmail == resource.data.normalizedEmail
-        && request.resource.data.phone == resource.data.phone
-        && request.resource.data.gender == resource.data.gender
-        && request.resource.data.birthDate == resource.data.birthDate
-        && request.resource.data.gym == resource.data.gym
-        && request.resource.data.postalCode == resource.data.postalCode
-        && request.resource.data.prefecture == resource.data.prefecture
-        && request.resource.data.city == resource.data.city
-        && request.resource.data.addressLine == resource.data.addressLine
-        && request.resource.data.category == resource.data.category
-        && request.resource.data.ageCategory == resource.data.ageCategory
-        && request.resource.data.weightClass == resource.data.weightClass
-        && request.resource.data.openClass == resource.data.openClass
-        && request.resource.data.athlete == resource.data.athlete
-        && request.resource.data.representative == resource.data.representative
-        && request.resource.data.athletes == resource.data.athletes
-        && request.resource.data.entryFee == resource.data.entryFee
-        && request.resource.data.priceType == resource.data.priceType
-        && request.resource.data.athleteCount == resource.data.athleteCount
-        && request.resource.data.paymentProvider == resource.data.paymentProvider
-        && request.resource.data.receptionStatus == resource.data.receptionStatus
-        && request.resource.data.weighInStatus == resource.data.weighInStatus
-        && request.resource.data.bibNumber == resource.data.bibNumber
-        && request.resource.data.bracketPosition == resource.data.bracketPosition
-        && request.resource.data.checkedInAt == resource.data.checkedInAt
-        && request.resource.data.weighInAt == resource.data.weighInAt
-        && request.resource.data.participantCount == resource.data.participantCount
-        && request.resource.data.categoryEntryCount == resource.data.categoryEntryCount
-        && request.resource.data.subtotalAmount == resource.data.subtotalAmount
-        && request.resource.data.discountAmount == resource.data.discountAmount
-        && request.resource.data.totalAmount == resource.data.totalAmount
-        && request.resource.data.currency == resource.data.currency
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.paymentStatus in ["paid", "failed"]
-        && (
-          (
-            resource.data.paymentStatus == "pending"
-            && request.resource.data.paymentStatus == "paid"
-            && request.resource.data.entryStatus == "confirmed"
-          )
-          || (
-            resource.data.paymentStatus == "pending"
-            && request.resource.data.paymentStatus == "failed"
-            && request.resource.data.entryStatus == "cancelled"
-          )
-        );
-    }
-
-    function publicEntryUpdateAllowed() {
-      return publicEntryPaymentUpdateAllowed();
-    }
-
-    function confirmedPaidEntry(data) {
-      return data.paymentStatus == "paid"
-        && data.entryStatus == "confirmed";
-    }
-
-    function publicConfirmedEntryReadAllowed(entryId) {
-      return confirmedPaidEntry(resource.data)
-        && entryId == resource.data.eventId + "_" + resource.data.normalizedEmail;
-    }
-
-    function mailLogKeysAllowed(data) {
-      return data.keys().hasOnly([
-        "logId",
-        "entryId",
-        "eventId",
-        "eventTitle",
-        "recipientEmail",
-        "recipientName",
-        "recipientType",
-        "mailType",
-        "subject",
-        "bodyPreview",
-        "status",
-        "errorMessage",
-        "provider",
-        "sentAt",
-        "createdAt",
-        "createdByAdminUid",
-        "createdByAdminEmail"
-      ]);
-    }
-
-    function publicEntryCompletedMailLogCreateAllowed(logId) {
-      return mailLogKeysAllowed(request.resource.data)
-        && request.resource.data.logId == logId
-        && request.resource.data.entryId is string
-        && exists(/databases/$(database)/documents/entries/$(request.resource.data.entryId))
-        && confirmedPaidEntry(get(/databases/$(database)/documents/entries/$(request.resource.data.entryId)).data)
-        && request.resource.data.eventId == get(/databases/$(database)/documents/entries/$(request.resource.data.entryId)).data.eventId
-        && request.resource.data.eventTitle == get(/databases/$(database)/documents/entries/$(request.resource.data.entryId)).data.eventTitle
-        && request.resource.data.recipientEmail is string
-        && request.resource.data.recipientName is string
-        && request.resource.data.recipientType in ["user", "admin"]
-        && request.resource.data.mailType == "entry_completed"
-        && request.resource.data.subject is string
-        && request.resource.data.bodyPreview is string
-        && request.resource.data.status in ["sent", "failed"]
-        && (
-          request.resource.data.errorMessage == null
-          || request.resource.data.errorMessage is string
-        )
-        && request.resource.data.provider in ["php-mail-api", "resend"]
-        && request.resource.data.sentAt == request.time
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.createdByAdminUid == null
-        && request.resource.data.createdByAdminEmail == null;
-    }
-
-    function publicEntryReplaceAllowed() {
-      return publicEntryCreateAllowed()
-        && !confirmedPaidEntry(resource.data);
     }
 
     match /events/{eventId} {
@@ -376,14 +84,31 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 変更履歴・入金や返金の記録がある申込、支払済みの申込は削除できない
+    // （取消は「申込全体のキャンセル」で状態を残す）。
+    function adminEntryDeleteAllowed() {
+      return resource.data.paymentStatus != "paid"
+        && resource.data.get("revision", 0) == 0
+        && resource.data.get("accountingInitialized", false) != true;
+    }
+
     match /entries/{entryId} {
-      allow get: if publicConfirmedEntryReadAllowed(entryId) || isAdmin();
-      allow list: if isAdmin();
-      allow create: if publicEntryCreateAllowed() || isAdmin();
-      allow update: if publicEntryUpdateAllowed()
-        || publicEntryReplaceAllowed()
-        || isAdmin();
-      allow delete: if isAdmin();
+      allow read: if isAdmin();
+      allow create: if false;
+      allow update: if isAdmin() && adminEntryUpdateAllowed();
+      allow delete: if isAdmin() && adminEntryDeleteAllowed();
+
+      // 金額の記録（台帳）と変更履歴。サーバー（Admin SDK）だけが追記し、
+      // 管理者を含め、ブラウザからは作成・上書き・削除できない。
+      match /ledger/{recordId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+
+      match /history/{recordId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
     }
 
     match /adminUsers/{uid} {
@@ -391,10 +116,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 受付メール・完了メールの履歴はサーバー（Admin SDK）が書き込む。
     match /emailLogs/{logId} {
       allow read: if isAdmin();
-      allow create: if isAdmin() || publicEntryCompletedMailLogCreateAllowed(logId);
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     match /inquiries/{inquiryId} {

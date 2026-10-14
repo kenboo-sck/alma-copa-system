@@ -49,26 +49,6 @@ function InfoLine({
   );
 }
 
-function EarlyEntryPolicyCard() {
-  return (
-    <div className="rounded-3xl border border-alma-gold/45 bg-[linear-gradient(145deg,rgba(21,27,45,0.88),rgba(8,11,22,0.94))] px-5 py-6 shadow-[0_20px_70px_rgba(0,0,0,0.28)] sm:px-7 sm:py-7">
-      <p className="text-[0.68rem] font-semibold uppercase tracking-[0.3em] text-alma-gold/85">
-        EARLY ENTRY POLICY
-      </p>
-      <div className="mt-4 space-y-5 text-sm font-semibold leading-8 text-zinc-100 sm:text-base sm:leading-9">
-        <p>本大会は早期エントリー制を採用しております。</p>
-        <p>
-          目標をいち早く定め、トレーニングに集中したい選手を支援するため、早期のお申し込みには優待価格を適用いたします。
-        </p>
-        <p>決断の早さが、ケージでの余裕を生む。</p>
-        <p>
-          スムーズな大会運営へのご協力に感謝し、皆様のエントリーをお待ちしております。
-        </p>
-      </div>
-    </div>
-  );
-}
-
 function AboutItemCard({
   label,
   value,
@@ -349,8 +329,6 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                 />
               </div>
             </div>
-
-            <EarlyEntryPolicyCard />
 
             <div className="border-b border-white/10 pb-8">
               <p className="text-xs font-semibold uppercase tracking-[0.34em] text-alma-gold/90">

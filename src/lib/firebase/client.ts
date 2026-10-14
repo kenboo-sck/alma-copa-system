@@ -57,7 +57,7 @@ const firebaseConfig = {
     : requirePublicEnv(
         "NEXT_PUBLIC_FIREBASE_APP_ID",
         process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  ),
+      ),
 };
 
 console.log("[Firebase client] initializeApp apiKey", {
@@ -94,9 +94,18 @@ if (
   typeof window !== "undefined" &&
   !window.__ALMA_FIREBASE_EMULATORS_CONNECTED__
 ) {
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", {
+  // ポートを変える場合は NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST /
+  // NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST を設定する（サーバー側の
+  // FIREBASE_AUTH_EMULATOR_HOST / FIRESTORE_EMULATOR_HOST と同じ値にする）。
+  const authEmulatorHost =
+    process.env.NEXT_PUBLIC_FIREBASE_AUTH_EMULATOR_HOST || "127.0.0.1:9099";
+  const [firestoreEmulatorHost, firestoreEmulatorPort] = (
+    process.env.NEXT_PUBLIC_FIRESTORE_EMULATOR_HOST || "127.0.0.1:8080"
+  ).split(":");
+
+  connectAuthEmulator(auth, `http://${authEmulatorHost}`, {
     disableWarnings: true,
   });
-  connectFirestoreEmulator(db, "127.0.0.1", 8080);
+  connectFirestoreEmulator(db, firestoreEmulatorHost, Number(firestoreEmulatorPort));
   window.__ALMA_FIREBASE_EMULATORS_CONNECTED__ = true;
 }

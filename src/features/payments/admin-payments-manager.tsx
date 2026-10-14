@@ -6,6 +6,11 @@ import { useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import {
+  PAYMENT_METHOD_LABELS,
+  toPaymentMethod,
+  type PaymentMethod,
+} from "@/lib/payments/payment-methods";
 
 type PaymentStatus = "pending" | "paid" | "failed";
 
@@ -13,6 +18,7 @@ type PaymentEntry = {
   id: string;
   eventId: string;
   paymentStatus: PaymentStatus;
+  paymentMethod: PaymentMethod;
   totalAmount: number;
   currency: "JPY";
   stripeCheckoutSessionId?: string;
@@ -26,10 +32,7 @@ const paymentStatusLabels: Record<PaymentStatus, string> = {
   failed: "失敗",
 };
 
-const paymentStatusTones: Record<
-  PaymentStatus,
-  "neutral" | "success" | "danger"
-> = {
+const paymentStatusTones: Record<PaymentStatus, "neutral" | "success" | "danger"> = {
   pending: "neutral",
   paid: "success",
   failed: "danger",
@@ -86,8 +89,8 @@ export function AdminPaymentsManager() {
               id: entrySnapshot.id,
               eventId: typeof data.eventId === "string" ? data.eventId : "-",
               paymentStatus: toPaymentStatus(data.paymentStatus),
-              totalAmount:
-                typeof data.totalAmount === "number" ? data.totalAmount : 0,
+              paymentMethod: toPaymentMethod(data.paymentMethod),
+              totalAmount: typeof data.totalAmount === "number" ? data.totalAmount : 0,
               currency: "JPY" as const,
               stripeCheckoutSessionId:
                 typeof data.stripeCheckoutSessionId === "string"
@@ -130,7 +133,8 @@ export function AdminPaymentsManager() {
         <p className="text-sm font-semibold text-alma-gold">決済管理</p>
         <h1 className="mt-2 text-2xl font-bold text-white">決済</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-400">
-          Stripe Checkoutの決済状態を確認します。
+          カード決済（Stripe）・銀行振込・現金払いの支払状態を確認します。
+          振込入金・現金受領の記録はエントリー管理画面で行います。
         </p>
       </div>
 
@@ -167,7 +171,8 @@ export function AdminPaymentsManager() {
                 <tr>
                   <th className="px-4 py-3 font-semibold">エントリーID</th>
                   <th className="px-4 py-3 font-semibold">大会ID</th>
-                  <th className="px-4 py-3 font-semibold">決済状態</th>
+                  <th className="px-4 py-3 font-semibold">支払方法</th>
+                  <th className="px-4 py-3 font-semibold">支払状態</th>
                   <th className="px-4 py-3 text-right font-semibold">金額</th>
                   <th className="px-4 py-3 font-semibold">Stripe Session</th>
                   <th className="px-4 py-3 font-semibold">更新日時</th>
@@ -181,6 +186,9 @@ export function AdminPaymentsManager() {
                     </td>
                     <td className="px-4 py-4 font-mono text-xs text-zinc-300">
                       {entry.eventId}
+                    </td>
+                    <td className="px-4 py-4 text-zinc-300">
+                      {PAYMENT_METHOD_LABELS[entry.paymentMethod]}
                     </td>
                     <td className="px-4 py-4">
                       <StatusBadge

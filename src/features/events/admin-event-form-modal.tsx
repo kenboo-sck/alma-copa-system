@@ -42,6 +42,8 @@ export function AdminEventFormModal({
     defaultValues: defaultEventFormValues,
   });
   const isAboutSectionEnabled = watch("aboutSection.enabled") === "true";
+  const isBankTransferEnabled = watch("paymentBankTransfer");
+  const isCashEnabled = watch("paymentCash");
 
   useEffect(() => {
     reset(event ? getEventFormValues(event) : defaultEventFormValues);
@@ -482,6 +484,125 @@ export function AdminEventFormModal({
                 <span className="text-xs text-red-300">{errors.lateEndAt.message}</span>
               ) : null}
             </label>
+          </div>
+
+          <div className="mt-6 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-sm font-semibold text-zinc-200">支払方法</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              申込フォームには、ここで有効にした支払方法だけが表示されます（少なくとも1つ）。
+              変更しても、申込済みのエントリーに保存された支払案内は変わりません。
+            </p>
+
+            <div className="mt-4 space-y-4">
+              <label className="flex items-center gap-3 text-sm text-zinc-200">
+                <input
+                  type="checkbox"
+                  {...register("paymentCard")}
+                  className="h-4 w-4 accent-alma-gold"
+                />
+                クレジットカード（Stripe）
+              </label>
+              {errors.paymentCard ? (
+                <span className="block text-xs text-red-300">
+                  {errors.paymentCard.message}
+                </span>
+              ) : null}
+
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 text-sm text-zinc-200">
+                  <input
+                    type="checkbox"
+                    {...register("paymentBankTransfer")}
+                    className="h-4 w-4 accent-alma-gold"
+                  />
+                  銀行振込
+                </label>
+                {isBankTransferEnabled ? (
+                  <div className="grid gap-3 border-l border-alma-gold/30 pl-4">
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold text-zinc-400">
+                        振込先（銀行名・支店名・口座種別・口座番号・口座名義）
+                      </span>
+                      <textarea
+                        {...register("bankAccountInfo")}
+                        rows={4}
+                        className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                      />
+                      {errors.bankAccountInfo ? (
+                        <span className="text-xs text-red-300">
+                          {errors.bankAccountInfo.message}
+                        </span>
+                      ) : null}
+                    </label>
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold text-zinc-400">
+                        振込期限日（日本時間・当日中まで有効）
+                      </span>
+                      <input
+                        type="date"
+                        {...register("bankDueDate")}
+                        className="h-11 w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                      />
+                      <span className="block text-xs leading-5 text-zinc-500">
+                        期限日を過ぎると、申込フォームで銀行振込を選択できなくなります。
+                        期限を過ぎた未払いの申込は管理画面に「振込期限超過」と表示されます（自動キャンセルはしません）。
+                      </span>
+                      {errors.bankDueDate ? (
+                        <span className="text-xs text-red-300">
+                          {errors.bankDueDate.message}
+                        </span>
+                      ) : null}
+                    </label>
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold text-zinc-400">
+                        案内文（振込手数料のご負担、振込名義の指定など）
+                      </span>
+                      <textarea
+                        {...register("bankNote")}
+                        rows={3}
+                        className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                      />
+                      {errors.bankNote ? (
+                        <span className="text-xs text-red-300">
+                          {errors.bankNote.message}
+                        </span>
+                      ) : null}
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 text-sm text-zinc-200">
+                  <input
+                    type="checkbox"
+                    {...register("paymentCash")}
+                    className="h-4 w-4 accent-alma-gold"
+                  />
+                  現金払い
+                </label>
+                {isCashEnabled ? (
+                  <div className="grid gap-3 border-l border-alma-gold/30 pl-4">
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold text-zinc-400">
+                        案内文（お支払いの場所・受付時間・期限など）
+                      </span>
+                      <textarea
+                        {...register("cashNote")}
+                        rows={3}
+                        placeholder="例: 大会当日の受付、または事前に道場の窓口へご持参ください。"
+                        className="w-full rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none transition focus:border-alma-gold"
+                      />
+                      {errors.cashNote ? (
+                        <span className="text-xs text-red-300">
+                          {errors.cashNote.message}
+                        </span>
+                      ) : null}
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">

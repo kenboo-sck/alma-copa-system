@@ -7,6 +7,8 @@ export type AdminPermission =
   | "entries:read"
   | "entries:write"
   | "payments:read"
+  // 振込入金・現金受領の記録（支払済みへの変更）。
+  | "payments:write"
   | "emails:read"
   | "emails:send"
   | "reception:write"

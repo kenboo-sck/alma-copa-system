@@ -1,7 +1,13 @@
 import "server-only";
 
 import { getApps, initializeApp } from "firebase/app";
-import { getFirestore, type Firestore } from "firebase/firestore/lite";
+import {
+  connectFirestoreEmulator,
+  getFirestore,
+  type Firestore,
+} from "firebase/firestore/lite";
+
+import { getFirestoreEmulatorHost } from "@/lib/firebase/emulator";
 
 function requirePublicEnv(name: string) {
   const value = process.env[name]?.trim();
@@ -49,7 +55,19 @@ export function isPublicFirestoreConfigured() {
   return getMissingPublicFirestoreEnvNames().length === 0;
 }
 
+let isEmulatorConnected = false;
+
 export function getPublicFirestore(): Firestore {
   const app = getApps().length ? getApps()[0] : initializeApp(getFirebaseConfig());
-  return getFirestore(app);
+  const firestore = getFirestore(app);
+  const emulatorHost = getFirestoreEmulatorHost();
+
+  // ローカル検証では、ブラウザ側・Admin SDK と同じ Firestore Emulator に接続する。
+  if (emulatorHost && !isEmulatorConnected) {
+    const [host, port] = emulatorHost.split(":");
+    connectFirestoreEmulator(firestore, host, Number(port));
+    isEmulatorConnected = true;
+  }
+
+  return firestore;
 }

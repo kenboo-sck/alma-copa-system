@@ -1,9 +1,9 @@
 import "server-only";
 
-import { collection, doc, serverTimestamp, setDoc } from "firebase/firestore/lite";
+import { FieldValue } from "firebase-admin/firestore";
 
+import { getAdminFirestore } from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
-import type { getPublicFirestore } from "@/lib/firebase/public-firestore";
 
 export type MailLogStatus = "sent" | "failed";
 export type MailLogRecipientType = "user" | "admin";
@@ -42,13 +42,14 @@ export function toMailLogProvider(provider: string) {
   return provider === "php" ? "php-mail-api" : provider;
 }
 
-export async function createPublicMailLog(
-  db: ReturnType<typeof getPublicFirestore>,
-  input: MailLogInput,
-) {
-  const logRef = doc(collection(db, collections.emailLogs));
+// 受付メール／完了メールの送信履歴を、サーバー（Admin SDK）から記録する。
+// 一般ユーザーからのメール履歴の書き込みは Firestore ルールで認めていない。
+export async function createServerMailLog(input: MailLogInput) {
+  const logRef = getAdminFirestore()
+    .collection(collections.emailLogs)
+    .doc(createMailLogId());
 
-  await setDoc(logRef, {
+  await logRef.set({
     logId: logRef.id,
     entryId: input.entryId,
     eventId: input.eventId,
@@ -62,8 +63,8 @@ export async function createPublicMailLog(
     status: input.status,
     errorMessage: input.errorMessage,
     provider: input.provider,
-    sentAt: serverTimestamp(),
-    createdAt: serverTimestamp(),
+    sentAt: FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
     createdByAdminUid: input.createdByAdminUid,
     createdByAdminEmail: input.createdByAdminEmail,
   });

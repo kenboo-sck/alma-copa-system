@@ -9,18 +9,58 @@ import {
   Timestamp,
   updateDoc,
 } from "firebase/firestore";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAdminAuth } from "@/features/admin-auth";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
+import {
+  PAYMENT_STATE_LABELS,
+  PAYMENT_STATE_TONES,
+  getPaymentState,
+  readEntryAccounting,
+  type EntryAccounting,
+} from "@/lib/entries/entry-accounting";
+import { getGenderLabel } from "@/lib/entries/entry-divisions";
+import {
+  DIVISION_CSV_HEADERS,
+  RECORD_DIVISION_LABELS,
+  RECORD_STATUS_LABELS,
+  UNSET_LABEL,
+  buildDivisionCsvCells,
+  describeDivisionEntryRecord,
+  emptyDivisionEntryFilters,
+  getAgeCategoryLabel,
+  getAthleteClassLabel,
+  getDivisionWeightGroupLabel,
+  getRankLabel,
+  getWeightClassLabel,
+  mapEntryAthletes,
+  matchesDivisionEntryFilters,
+  type AthleteRecord,
+  type DivisionEntryFilters,
+  type DivisionEntryRecord,
+} from "@/lib/entries/entry-records";
+import {
+  PAYMENT_METHODS,
+  PAYMENT_METHOD_LABELS,
+  formatPaymentDueDate,
+  getEntryStatusLabel,
+  isBankTransferOverdue,
+  toEntryPaymentStatus,
+  toPaymentMethod,
+  type PaymentMethod,
+} from "@/lib/payments/payment-methods";
 import type { EntryType, ReceptionStatus } from "@/types/entry";
 
 type PaymentStatus = "pending" | "paid" | "failed";
 type PaymentStatusFilter = "all" | PaymentStatus;
+type PaymentMethodFilter = "all" | PaymentMethod;
+type OverdueFilter = "all" | "overdue";
+type ParticipationFilter = "all" | "active" | "cancelled";
 type ReceptionStatusFilter = "all" | ReceptionStatus;
-type WeightClassFilter = "all" | string;
 type ViewMode = "list" | "weightClass";
 
 type AdminEntry = {
@@ -35,27 +75,36 @@ type AdminEntry = {
   phone: string;
   birthDate: Date | null;
   gym: string;
-  category: string;
-  weightClass: string;
+  gender: string;
+  guardianName: string;
+  // "legacy" は Gi / No-Gi 対応前の旧形式の申込。
+  format: AthleteRecord["format"];
+  // 出場部門ごとの情報。絞り込み後の一覧では、条件に一致した部門だけが入る。
+  // 取消済みの部門も status: "cancelled" で含まれる。
+  divisionEntries: DivisionEntryRecord[];
+  // 選手（または申込全体）が取消済みかどうか。
+  status: AthleteRecord["status"];
+  // 請求・入金・返金の内訳（申込全体）。
+  accounting: EntryAccounting;
   paymentStatus: PaymentStatus;
+  // 支払方法を持たない申込（支払方法の追加前）はカードとして扱う。
+  paymentMethod: PaymentMethod;
+  // 申込状態（支払状態とは別）。
+  entryStatus: string;
+  // 申込時にサーバーが確定した金額（申込全体）。
+  totalAmount: number;
+  // 銀行振込の支払期限（日本時間の "YYYY-MM-DD"）。
+  paymentDueDate: string;
+  paymentConfirmedAt: Date | null;
+  paymentConfirmedByEmail: string;
+  // カード決済の金額・申込との照合に失敗した場合の理由（要確認）。
+  paymentIssueReason: string;
   stripeSessionId: string;
   stripePaymentIntentId: string;
   receptionStatus: ReceptionStatus;
   checkedInAt: Date | null;
   createdAt: Date | null;
   updatedAt: Date | null;
-};
-
-const paymentStatusLabels: Record<PaymentStatus, string> = {
-  pending: "未払い",
-  paid: "支払い済み",
-  failed: "失敗",
-};
-
-const paymentStatusTones: Record<PaymentStatus, "neutral" | "success" | "danger"> = {
-  pending: "neutral",
-  paid: "success",
-  failed: "danger",
 };
 
 const entryTypeLabels: Record<EntryType, string> = {
@@ -67,8 +116,6 @@ const receptionStatusLabels: Record<ReceptionStatus, string> = {
   not_checked_in: "未受付",
   checked_in: "受付済",
 };
-
-const unsetWeightClassLabel = "階級未設定";
 
 function toDate(value: unknown): Date | null {
   if (value instanceof Timestamp) {
@@ -83,7 +130,11 @@ function toDate(value: unknown): Date | null {
 }
 
 function toPaymentStatus(value: unknown): PaymentStatus {
-  return value === "paid" || value === "failed" ? value : "pending";
+  return toEntryPaymentStatus(value);
+}
+
+function formatYen(value: number) {
+  return `${value.toLocaleString("ja-JP")}円`;
 }
 
 function toEntryType(value: unknown): EntryType {
@@ -124,10 +175,6 @@ function csvCell(value: string) {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function getWeightClassName(entry: AdminEntry) {
-  return entry.weightClass.trim() || unsetWeightClassLabel;
-}
-
 function stringField(data: Record<string, unknown>, key: string) {
   const value = data[key];
   return typeof value === "string" ? value : "";
@@ -147,6 +194,17 @@ function mapEntrySnapshotToAdminEntries(
     phone: stringField(data, "phone"),
     gym: stringField(data, "gym"),
     paymentStatus: toPaymentStatus(data.paymentStatus),
+    accounting: readEntryAccounting(data),
+    paymentMethod: toPaymentMethod(data.paymentMethod),
+    entryStatus: stringField(data, "entryStatus"),
+    totalAmount: typeof data.totalAmount === "number" ? data.totalAmount : 0,
+    paymentDueDate: stringField(data, "paymentDueDate"),
+    paymentConfirmedAt: toDate(data.paymentConfirmedAt) ?? toDate(data.paidAt),
+    paymentConfirmedByEmail: stringField(data, "paymentConfirmedByEmail"),
+    paymentIssueReason:
+      data.paymentIssue && typeof data.paymentIssue === "object"
+        ? stringField(data.paymentIssue as Record<string, unknown>, "reason")
+        : "",
     stripeSessionId:
       stringField(data, "stripeSessionId") ||
       stringField(data, "stripeCheckoutSessionId"),
@@ -157,36 +215,162 @@ function mapEntrySnapshotToAdminEntries(
     updatedAt: toDate(data.updatedAt),
   };
 
-  if (entryType === "representative" && Array.isArray(data.athletes)) {
-    const athletes = data.athletes.filter(
-      (athlete): athlete is Record<string, unknown> =>
-        Boolean(athlete) && typeof athlete === "object" && !Array.isArray(athlete),
-    );
+  return mapEntryAthletes(data, toDate).map((athlete) => ({
+    ...baseEntry,
+    id:
+      athlete.athleteIndex === null
+        ? entryId
+        : `${entryId}__athlete_${athlete.athleteIndex}`,
+    name: athlete.name,
+    kana: athlete.kana,
+    birthDate: athlete.birthDate,
+    gender: athlete.gender,
+    guardianName: athlete.guardianName,
+    format: athlete.format,
+    status: athlete.status,
+    divisionEntries: athlete.divisionEntries,
+  }));
+}
 
-    if (athletes.length > 0) {
-      return athletes.map((athlete, index) => ({
-        ...baseEntry,
-        id: `${entryId}__athlete_${index}`,
-        name: stringField(athlete, "name"),
-        kana: stringField(athlete, "kana"),
-        birthDate: toDate(athlete.birthDate),
-        category: stringField(athlete, "category"),
-        weightClass: stringField(athlete, "weightClass"),
-      }));
-    }
+function sortFilterLabels(a: string, b: string) {
+  if (a === UNSET_LABEL) {
+    return 1;
+  }
+  if (b === UNSET_LABEL) {
+    return -1;
+  }
+  return a.localeCompare(b, "ja-JP");
+}
+
+function countLabels(labels: string[]) {
+  const map = new Map<string, number>();
+
+  for (const label of labels) {
+    map.set(label, (map.get(label) ?? 0) + 1);
   }
 
-  return [
-    {
-      ...baseEntry,
-      id: entryId,
-      name: stringField(data, "name"),
-      kana: stringField(data, "kana"),
-      birthDate: toDate(data.birthDate),
-      category: stringField(data, "category"),
-      weightClass: stringField(data, "weightClass"),
-    },
-  ];
+  return Array.from(map.entries())
+    .sort(([a], [b]) => sortFilterLabels(a, b))
+    .map(([label, count]) => ({ label, count }));
+}
+
+const filterSelectClassName =
+  "h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold";
+
+function EntryDivisionLines({ entry }: { entry: AdminEntry }) {
+  return (
+    <div className="space-y-1">
+      {entry.divisionEntries.map((divisionEntry) => (
+        <p
+          key={divisionEntry.division}
+          className={divisionEntry.status === "cancelled" ? "text-zinc-500" : undefined}
+        >
+          {divisionEntry.status === "cancelled" ? (
+            <span className="mr-1 rounded-sm border border-red-800/70 px-1 text-xs text-red-300">
+              取消済み
+            </span>
+          ) : null}
+          <span
+            className={
+              divisionEntry.status === "cancelled" ? "line-through" : undefined
+            }
+          >
+            {describeDivisionEntryRecord(divisionEntry)}
+          </span>
+        </p>
+      ))}
+      {entry.guardianName ? (
+        <p className="text-xs text-zinc-500">保護者: {entry.guardianName}</p>
+      ) : null}
+    </div>
+  );
+}
+
+// 支払方法・支払状態・確定金額・振込期限と、入金／現金受領の記録ボタン。
+function EntryPaymentSummary({
+  entry,
+  canRecordPayment,
+  isRecording,
+  onRecordPayment,
+}: {
+  entry: AdminEntry;
+  canRecordPayment: boolean;
+  isRecording: boolean;
+  onRecordPayment: (entry: AdminEntry) => void;
+}) {
+  const isOverdue = isBankTransferOverdue(entry);
+  const isManualPayment = entry.paymentMethod !== "card";
+  const { accounting } = entry;
+  const paymentState = getPaymentState(accounting);
+  const canRecord =
+    canRecordPayment &&
+    isManualPayment &&
+    accounting.dueAmount > 0 &&
+    entry.entryStatus !== "cancelled";
+
+  return (
+    <div className="space-y-1.5 text-xs text-zinc-400">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge
+          label={PAYMENT_STATE_LABELS[paymentState]}
+          tone={PAYMENT_STATE_TONES[paymentState]}
+        />
+        {isOverdue ? <StatusBadge label="振込期限超過" tone="danger" /> : null}
+        {entry.paymentIssueReason ? (
+          <StatusBadge label="決済要確認" tone="danger" />
+        ) : null}
+      </div>
+      <p className="text-zinc-300">
+        {PAYMENT_METHOD_LABELS[entry.paymentMethod]} / 請求{" "}
+        {formatYen(accounting.billedAmount)}
+      </p>
+      {accounting.paidAmount > 0 && paymentState !== "paid" ? (
+        <p>入金済み {formatYen(accounting.paidAmount)}</p>
+      ) : null}
+      {accounting.dueAmount > 0 && accounting.paidAmount > 0 ? (
+        <p className="text-alma-gold">追加支払 {formatYen(accounting.dueAmount)}</p>
+      ) : null}
+      {accounting.refundPlannedAmount > 0 ? (
+        <p>
+          返金予定 {formatYen(accounting.refundPlannedAmount)} / 返金済み{" "}
+          {formatYen(accounting.refundedAmount)}
+        </p>
+      ) : null}
+      <p>申込: {getEntryStatusLabel(entry.entryStatus)}</p>
+      {entry.paymentMethod === "bank_transfer" && entry.paymentDueDate ? (
+        <p>期限: {formatPaymentDueDate(entry.paymentDueDate)}</p>
+      ) : null}
+      {entry.paymentStatus === "paid" && entry.paymentConfirmedAt ? (
+        <p>
+          確認: {formatDateTime(entry.paymentConfirmedAt)}
+          {entry.paymentConfirmedByEmail ? `（${entry.paymentConfirmedByEmail}）` : ""}
+        </p>
+      ) : null}
+      {entry.paymentIssueReason ? (
+        <p className="text-red-300">照合エラー: {entry.paymentIssueReason}</p>
+      ) : null}
+      {canRecord ? (
+        <button
+          type="button"
+          onClick={() => onRecordPayment(entry)}
+          disabled={isRecording}
+          className="rounded-md border border-alma-gold/60 px-2 py-1.5 text-xs font-semibold text-alma-gold transition hover:bg-alma-gold hover:text-black disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isRecording
+            ? "記録中..."
+            : entry.paymentMethod === "cash"
+              ? "現金受領を記録"
+              : "入金を記録"}
+        </button>
+      ) : null}
+      <Link
+        href={`/admin/entries/${encodeURIComponent(entry.entryId)}`}
+        className="inline-block rounded-md border border-white/10 px-2 py-1.5 text-xs font-semibold text-zinc-200 transition hover:border-alma-gold hover:text-alma-gold"
+      >
+        詳細・変更
+      </Link>
+    </div>
+  );
 }
 
 function compareEntriesByName(a: AdminEntry, b: AdminEntry) {
@@ -291,7 +475,11 @@ export function AdminEntriesManager({
   title = "エントリー",
   description = "申込者情報、決済状態、受付状態を確認・管理します。",
 }: AdminEntriesManagerProps = {}) {
-  const { firebaseUser } = useAdminAuth();
+  const { firebaseUser, adminUser } = useAdminAuth();
+  // 入金・現金受領の記録は、payments:write の権限を持つ管理者だけが行える（owner は常に可）。
+  const canRecordPayment =
+    adminUser?.role === "owner" ||
+    (adminUser?.permissions ?? []).includes("payments:write");
   const [entries, setEntries] = useState<AdminEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -299,10 +487,17 @@ export function AdminEntriesManager({
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] =
     useState<PaymentStatusFilter>("all");
+  const [paymentMethodFilter, setPaymentMethodFilter] =
+    useState<PaymentMethodFilter>("all");
+  const [overdueFilter, setOverdueFilter] = useState<OverdueFilter>("all");
+  const [participationFilter, setParticipationFilter] =
+    useState<ParticipationFilter>("all");
+  const [recordingEntryIds, setRecordingEntryIds] = useState<string[]>([]);
   const [receptionStatusFilter, setReceptionStatusFilter] =
     useState<ReceptionStatusFilter>("all");
-  const [weightClassFilter, setWeightClassFilter] =
-    useState<WeightClassFilter>("all");
+  const [divisionFilters, setDivisionFilters] = useState<DivisionEntryFilters>(
+    emptyDivisionEntryFilters,
+  );
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [eventFilter, setEventFilter] = useState("all");
   const [qrEntry, setQrEntry] = useState<AdminEntry | null>(null);
@@ -376,32 +571,34 @@ export function AdminEntriesManager({
     }));
   }, [entries]);
 
-  const weightClassOptions = useMemo(() => {
-    const map = new Map<string, number>();
+  const divisionFilterOptions = useMemo(() => {
+    const allDivisionEntries = entries.flatMap((entry) => entry.divisionEntries);
 
-    for (const entry of entries) {
-      const weightClassName = getWeightClassName(entry);
-      map.set(weightClassName, (map.get(weightClassName) ?? 0) + 1);
-    }
-
-    return Array.from(map.entries())
-      .sort(([a], [b]) => {
-        if (a === unsetWeightClassLabel) {
-          return 1;
-        }
-        if (b === unsetWeightClassLabel) {
-          return -1;
-        }
-        return a.localeCompare(b, "ja-JP");
-      })
-      .map(([weightClassName, count]) => ({ weightClassName, count }));
+    return {
+      ageCategories: countLabels(allDivisionEntries.map(getAgeCategoryLabel)),
+      weightClasses: countLabels(allDivisionEntries.map(getWeightClassLabel)),
+      ranks: countLabels(allDivisionEntries.map(getRankLabel)),
+    };
   }, [entries]);
+
+  function updateDivisionFilter<Key extends keyof DivisionEntryFilters>(
+    key: Key,
+    value: DivisionEntryFilters[Key],
+  ) {
+    setDivisionFilters((current) => ({ ...current, [key]: value }));
+  }
 
   const visibleEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    return entries.filter((entry) => {
-      const weightClassName = getWeightClassName(entry);
+    return entries.flatMap((entry) => {
+      // 部門に関する条件は、同じ 1 部門がすべて満たす場合だけ一致とする。
+      const matchedDivisionEntries = entry.divisionEntries.filter(
+        (divisionEntry) =>
+          matchesDivisionEntryFilters(divisionEntry, divisionFilters) &&
+          (participationFilter === "all" ||
+            divisionEntry.status === participationFilter),
+      );
       const matchesSearch =
         query.length === 0 ||
         [
@@ -410,60 +607,69 @@ export function AdminEntriesManager({
           entry.kana,
           entry.email,
           entry.phone,
-          entry.category,
           entry.gym,
+          entry.guardianName,
+          ...entry.divisionEntries.map(describeDivisionEntryRecord),
         ]
           .join(" ")
           .toLowerCase()
           .includes(query);
       const matchesPayment =
-        paymentStatusFilter === "all" || entry.paymentStatus === paymentStatusFilter;
+        (paymentStatusFilter === "all" ||
+          entry.paymentStatus === paymentStatusFilter) &&
+        (paymentMethodFilter === "all" ||
+          entry.paymentMethod === paymentMethodFilter) &&
+        (overdueFilter === "all" || isBankTransferOverdue(entry));
       const matchesReception =
         receptionStatusFilter === "all" ||
         entry.receptionStatus === receptionStatusFilter;
-      const matchesWeightClass =
-        weightClassFilter === "all" || weightClassName === weightClassFilter;
       const matchesEvent = eventFilter === "all" || entry.eventId === eventFilter;
 
-      return (
-        matchesSearch &&
-        matchesPayment &&
-        matchesReception &&
-        matchesWeightClass &&
-        matchesEvent
-      );
+      if (
+        matchedDivisionEntries.length === 0 ||
+        !matchesSearch ||
+        !matchesPayment ||
+        !matchesReception ||
+        !matchesEvent
+      ) {
+        return [];
+      }
+
+      return [{ ...entry, divisionEntries: matchedDivisionEntries }];
     });
   }, [
+    divisionFilters,
     entries,
     eventFilter,
+    overdueFilter,
+    participationFilter,
+    paymentMethodFilter,
     paymentStatusFilter,
     receptionStatusFilter,
     searchQuery,
-    weightClassFilter,
   ]);
 
+  // 部門・階級ごとのグループ。両部門に出場する選手は、それぞれのグループに入る。
   const visibleEntriesByWeightClass = useMemo(() => {
     const map = new Map<string, AdminEntry[]>();
 
     for (const entry of visibleEntries) {
-      const weightClassName = getWeightClassName(entry);
-      const group = map.get(weightClassName) ?? [];
-      group.push(entry);
-      map.set(weightClassName, group);
+      for (const divisionEntry of entry.divisionEntries) {
+        // 取消済みを表示する場合は、有効な出場と分けて集計する。
+        const groupLabel =
+          divisionEntry.status === "cancelled"
+            ? `${getDivisionWeightGroupLabel(divisionEntry)}（取消済み）`
+            : getDivisionWeightGroupLabel(divisionEntry);
+        const group = map.get(groupLabel) ?? [];
+        group.push({ ...entry, divisionEntries: [divisionEntry] });
+        map.set(groupLabel, group);
+      }
     }
 
     return Array.from(map.entries())
-      .sort(([a], [b]) => {
-        if (a === unsetWeightClassLabel) {
-          return 1;
-        }
-        if (b === unsetWeightClassLabel) {
-          return -1;
-        }
-        return a.localeCompare(b, "ja-JP");
-      })
-      .map(([weightClassName, groupEntries]) => ({
-        weightClassName,
+      .sort(([a], [b]) => a.localeCompare(b, "ja-JP"))
+      .map(([groupLabel, groupEntries]) => ({
+        groupLabel,
         entries: [...groupEntries].sort(compareEntriesByName),
       }));
   }, [visibleEntries]);
@@ -498,6 +704,69 @@ export function AdminEntriesManager({
     }
   }
 
+  // 振込入金・現金受領の記録。支払済みへの変更と、確認した管理者・日時の記録は
+  // サーバーが行う。同じ申込への二重操作は、サーバー側で重複処理しない。
+  async function recordPayment(entry: AdminEntry) {
+    if (recordingEntryIds.includes(entry.entryId)) {
+      return;
+    }
+
+    const actionLabel = entry.paymentMethod === "cash" ? "現金の受領" : "振込の入金";
+    const confirmed = window.confirm(
+      `「${entry.name}」の申込（${formatYen(entry.totalAmount)}）について、${actionLabel}を記録して支払い済みにします。よろしいですか？`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+    setRecordingEntryIds((currentIds) => [...currentIds, entry.entryId]);
+
+    try {
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error("管理者認証を確認できませんでした。");
+      }
+
+      const response = await fetch("/api/admin/entries/confirm-payment", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ entryId: entry.entryId }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        result?: string;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(data?.error ?? "入金の記録に失敗しました。");
+      }
+
+      setToast(
+        data?.result === "already_confirmed"
+          ? "すでに支払い済みとして記録されています。"
+          : `${actionLabel}を記録しました。`,
+      );
+    } catch (caughtError) {
+      console.error(caughtError);
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "入金の記録に失敗しました。",
+      );
+    } finally {
+      setRecordingEntryIds((currentIds) =>
+        currentIds.filter((entryId) => entryId !== entry.entryId),
+      );
+    }
+  }
+
+  // 1 行 = 選手 1 名 × 出場 1 部門。両部門に出場する選手は 2 行になる。
+  // 支払に関する列（確定金額など）は申込全体の値で、同じ申込の行には同じ値が入る。
   function exportCsv() {
     const headers = [
       "エントリーID",
@@ -509,28 +778,50 @@ export function AdminEntriesManager({
       "電話番号",
       "生年月日",
       "所属",
-      "カテゴリ",
-      "階級",
-      "決済状態",
+      ...DIVISION_CSV_HEADERS,
+      "支払方法",
+      "支払状態",
+      "請求額（申込全体）",
+      "入金済み額",
+      "返金予定額",
+      "返金済み額",
+      "追加支払額",
+      "支払期限",
+      "振込期限超過",
+      "入金確認日時",
+      "申込状態",
       "受付状態",
       "受付日時",
     ];
-    const rows = visibleEntries.map((entry) => [
-      entry.entryId,
-      entry.eventTitle,
-      entryTypeLabels[entry.entryType],
-      entry.name,
-      entry.kana,
-      entry.email,
-      entry.phone,
-      formatDate(entry.birthDate),
-      entry.gym,
-      entry.category,
-      getWeightClassName(entry),
-      paymentStatusLabels[entry.paymentStatus],
-      receptionStatusLabels[entry.receptionStatus],
-      formatDateTime(entry.checkedInAt),
-    ]);
+    const rows = visibleEntries.flatMap((entry) =>
+      entry.divisionEntries.map((divisionEntry) => [
+        entry.entryId,
+        entry.eventTitle,
+        entryTypeLabels[entry.entryType],
+        entry.name,
+        entry.kana,
+        entry.email,
+        entry.phone,
+        formatDate(entry.birthDate),
+        entry.gym,
+        ...buildDivisionCsvCells(entry, divisionEntry),
+        PAYMENT_METHOD_LABELS[entry.paymentMethod],
+        PAYMENT_STATE_LABELS[getPaymentState(entry.accounting)],
+        String(entry.accounting.billedAmount),
+        String(entry.accounting.paidAmount),
+        String(entry.accounting.refundPlannedAmount),
+        String(entry.accounting.refundedAmount),
+        String(entry.accounting.dueAmount),
+        entry.paymentDueDate,
+        isBankTransferOverdue(entry) ? "超過" : "",
+        entry.paymentStatus === "paid" && entry.paymentConfirmedAt
+          ? formatDateTime(entry.paymentConfirmedAt)
+          : "",
+        getEntryStatusLabel(entry.entryStatus),
+        receptionStatusLabels[entry.receptionStatus],
+        formatDateTime(entry.checkedInAt),
+      ]),
+    );
     const csv = [headers, ...rows]
       .map((row) => row.map((value) => csvCell(String(value))).join(","))
       .join("\r\n");
@@ -571,7 +862,9 @@ export function AdminEntriesManager({
       setToast("エントリーを削除しました。");
     } catch (caughtError) {
       console.error(caughtError);
-      setError("エントリーの削除に失敗しました。管理者権限を確認してください。");
+      setError(
+        "エントリーを削除できませんでした。支払済みの申込や、変更履歴・入金や返金の記録がある申込は削除できません。「詳細・変更」から申込全体をキャンセルしてください。",
+      );
     }
   }
 
@@ -815,7 +1108,7 @@ export function AdminEntriesManager({
       ) : null}
 
       <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-        <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px_180px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_140px_170px_130px_130px_130px]">
           <label className="space-y-2">
             <span className="text-xs font-semibold text-zinc-400">検索</span>
             <input
@@ -826,25 +1119,51 @@ export function AdminEntriesManager({
             />
           </label>
           <label className="space-y-2">
-            <span className="text-xs font-semibold text-zinc-400">階級</span>
+            <span className="text-xs font-semibold text-zinc-400">支払方法</span>
             <select
-              value={weightClassFilter}
-              onChange={(event) => setWeightClassFilter(event.target.value)}
+              value={paymentMethodFilter}
+              onChange={(event) =>
+                setPaymentMethodFilter(event.target.value as PaymentMethodFilter)
+              }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
               <option value="all">すべて</option>
-              {weightClassOptions.map((option) => (
-                <option
-                  key={option.weightClassName}
-                  value={option.weightClassName}
-                >
-                  {option.weightClassName}（{option.count}名）
+              {PAYMENT_METHODS.map((method) => (
+                <option key={method} value={method}>
+                  {PAYMENT_METHOD_LABELS[method]}
                 </option>
               ))}
             </select>
           </label>
           <label className="space-y-2">
-            <span className="text-xs font-semibold text-zinc-400">決済状態</span>
+            <span className="text-xs font-semibold text-zinc-400">出場状態</span>
+            <select
+              value={participationFilter}
+              onChange={(event) =>
+                setParticipationFilter(event.target.value as ParticipationFilter)
+              }
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            >
+              <option value="all">すべて（取消済みを含む）</option>
+              <option value="active">{RECORD_STATUS_LABELS.active}のみ</option>
+              <option value="cancelled">{RECORD_STATUS_LABELS.cancelled}のみ</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">振込期限</span>
+            <select
+              value={overdueFilter}
+              onChange={(event) =>
+                setOverdueFilter(event.target.value as OverdueFilter)
+              }
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            >
+              <option value="all">すべて</option>
+              <option value="overdue">期限超過のみ</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">支払状態</span>
             <select
               value={paymentStatusFilter}
               onChange={(event) =>
@@ -870,6 +1189,111 @@ export function AdminEntriesManager({
               <option value="all">すべて</option>
               <option value="not_checked_in">未受付</option>
               <option value="checked_in">受付済</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">部門</span>
+            <select
+              value={divisionFilters.division}
+              onChange={(event) =>
+                updateDivisionFilter(
+                  "division",
+                  event.target.value as DivisionEntryFilters["division"],
+                )
+              }
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              <option value="gi">{RECORD_DIVISION_LABELS.gi}</option>
+              <option value="nogi">{RECORD_DIVISION_LABELS.nogi}</option>
+              <option value="legacy">{RECORD_DIVISION_LABELS.legacy}</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">大人／キッズ</span>
+            <select
+              value={divisionFilters.athleteClass}
+              onChange={(event) =>
+                updateDivisionFilter(
+                  "athleteClass",
+                  event.target.value as DivisionEntryFilters["athleteClass"],
+                )
+              }
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              <option value="adult">大人</option>
+              <option value="kids">キッズ</option>
+              <option value="legacy">区分なし（旧形式）</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">年齢区分</span>
+            <select
+              value={divisionFilters.ageCategory}
+              onChange={(event) =>
+                updateDivisionFilter("ageCategory", event.target.value)
+              }
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              {divisionFilterOptions.ageCategories.map((option) => (
+                <option key={option.label} value={option.label}>
+                  {option.label}（{option.count}件）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">階級</span>
+            <select
+              value={divisionFilters.weightClass}
+              onChange={(event) =>
+                updateDivisionFilter("weightClass", event.target.value)
+              }
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              {divisionFilterOptions.weightClasses.map((option) => (
+                <option key={option.label} value={option.label}>
+                  {option.label}（{option.count}件）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">帯色／グレード</span>
+            <select
+              value={divisionFilters.rank}
+              onChange={(event) => updateDivisionFilter("rank", event.target.value)}
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              {divisionFilterOptions.ranks.map((option) => (
+                <option key={option.label} value={option.label}>
+                  {option.label}（{option.count}件）
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">無差別級</span>
+            <select
+              value={divisionFilters.openClass}
+              onChange={(event) =>
+                updateDivisionFilter(
+                  "openClass",
+                  event.target.value as DivisionEntryFilters["openClass"],
+                )
+              }
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              <option value="yes">参加</option>
+              <option value="no">不参加</option>
             </select>
           </label>
         </div>
@@ -913,7 +1337,7 @@ export function AdminEntriesManager({
                     : "text-zinc-300 hover:text-white"
                 }`}
               >
-                階級別
+                部門・階級別
               </button>
             </div>
           </div>
@@ -987,7 +1411,7 @@ export function AdminEntriesManager({
 
             return (
               <section
-                key={group.weightClassName}
+                key={group.groupLabel}
                 className="overflow-hidden rounded-lg border border-white/10 bg-white/[0.03]"
               >
                 <div className="border-b border-white/10 bg-black/40 p-4">
@@ -998,11 +1422,11 @@ export function AdminEntriesManager({
                         checked={isGroupSelected}
                         onChange={() => toggleWeightClassSelection(group.entries)}
                         className="mt-1 h-4 w-4 accent-alma-gold"
-                        aria-label={`${group.weightClassName}を全選択`}
+                        aria-label={`${group.groupLabel}を全選択`}
                       />
                       <div>
                         <h2 className="text-lg font-bold text-white">
-                          {group.weightClassName}（{group.entries.length}名）
+                          {group.groupLabel}（{group.entries.length}名）
                         </h2>
                         <p className="mt-1 text-xs text-zinc-500">
                           選択中 {groupSelectedCount}名
@@ -1052,21 +1476,21 @@ export function AdminEntriesManager({
                             <p className="mt-1 text-sm text-zinc-400">
                               {entry.eventTitle}
                             </p>
-                            <p className="mt-1 text-xs text-zinc-500">
-                              {entry.email}
-                            </p>
+                            <p className="mt-1 text-xs text-zinc-500">{entry.email}</p>
                           </div>
                         </label>
-                        <StatusBadge
-                          label={paymentStatusLabels[entry.paymentStatus]}
-                          tone={paymentStatusTones[entry.paymentStatus]}
+                        <EntryPaymentSummary
+                          entry={entry}
+                          canRecordPayment={canRecordPayment}
+                          isRecording={recordingEntryIds.includes(entry.entryId)}
+                          onRecordPayment={(target) => void recordPayment(target)}
                         />
                       </div>
                       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-                        <div>
-                          <dt className="text-xs text-zinc-500">階級</dt>
+                        <div className="sm:col-span-3">
+                          <dt className="text-xs text-zinc-500">出場内容</dt>
                           <dd className="mt-1 text-zinc-200">
-                            {getWeightClassName(entry)}
+                            <EntryDivisionLines entry={entry} />
                           </dd>
                         </div>
                         <div>
@@ -1124,7 +1548,8 @@ export function AdminEntriesManager({
                         <th className="px-4 py-3 font-semibold">氏名</th>
                         <th className="px-4 py-3 font-semibold">大会</th>
                         <th className="px-4 py-3 font-semibold">種別</th>
-                        <th className="px-4 py-3 font-semibold">決済</th>
+                        <th className="px-4 py-3 font-semibold">出場内容</th>
+                        <th className="px-4 py-3 font-semibold">支払</th>
                         <th className="px-4 py-3 font-semibold">受付</th>
                         <th className="px-4 py-3 font-semibold">作成日時</th>
                         <th className="px-4 py-3 font-semibold">操作</th>
@@ -1147,6 +1572,9 @@ export function AdminEntriesManager({
                           </td>
                           <td className="px-4 py-4">
                             <p className="font-semibold text-white">{entry.name}</p>
+                            {entry.status === "cancelled" ? (
+                              <StatusBadge label="取消済み" tone="danger" />
+                            ) : null}
                             <p className="mt-1 text-xs text-zinc-500">{entry.kana}</p>
                             <p className="mt-1 text-xs text-zinc-500">{entry.email}</p>
                           </td>
@@ -1156,10 +1584,15 @@ export function AdminEntriesManager({
                           <td className="px-4 py-4 text-zinc-300">
                             {entryTypeLabels[entry.entryType]}
                           </td>
+                          <td className="px-4 py-4 text-zinc-300">
+                            <EntryDivisionLines entry={entry} />
+                          </td>
                           <td className="px-4 py-4">
-                            <StatusBadge
-                              label={paymentStatusLabels[entry.paymentStatus]}
-                              tone={paymentStatusTones[entry.paymentStatus]}
+                            <EntryPaymentSummary
+                              entry={entry}
+                              canRecordPayment={canRecordPayment}
+                              isRecording={recordingEntryIds.includes(entry.entryId)}
+                              onRecordPayment={(target) => void recordPayment(target)}
                             />
                           </td>
                           <td className="px-4 py-4 text-zinc-300">
@@ -1232,23 +1665,32 @@ export function AdminEntriesManager({
                     </div>
                   </label>
                   <div className="shrink-0">
-                    <StatusBadge
-                      label={paymentStatusLabels[entry.paymentStatus]}
-                      tone={paymentStatusTones[entry.paymentStatus]}
+                    <EntryPaymentSummary
+                      entry={entry}
+                      canRecordPayment={canRecordPayment}
+                      isRecording={recordingEntryIds.includes(entry.entryId)}
+                      onRecordPayment={(target) => void recordPayment(target)}
                     />
                   </div>
                 </div>
                 <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                   <div>
-                    <dt className="text-xs text-zinc-500">種別 / 階級</dt>
+                    <dt className="text-xs text-zinc-500">種別 / 性別</dt>
                     <dd className="mt-1 text-zinc-200">
-                      {entryTypeLabels[entry.entryType]} / {getWeightClassName(entry)}
+                      {entryTypeLabels[entry.entryType]} /{" "}
+                      {getGenderLabel(entry.gender) || "-"}
                     </dd>
                   </div>
                   <div>
                     <dt className="text-xs text-zinc-500">受付</dt>
                     <dd className="mt-1 text-zinc-200">
                       {receptionStatusLabels[entry.receptionStatus]}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="text-xs text-zinc-500">出場内容</dt>
+                    <dd className="mt-1 text-zinc-200">
+                      <EntryDivisionLines entry={entry} />
                     </dd>
                   </div>
                 </dl>
@@ -1314,8 +1756,8 @@ export function AdminEntriesManager({
                     <th className="px-4 py-3 font-semibold">氏名</th>
                     <th className="px-4 py-3 font-semibold">大会</th>
                     <th className="px-4 py-3 font-semibold">種別</th>
-                    <th className="px-4 py-3 font-semibold">階級</th>
-                    <th className="px-4 py-3 font-semibold">決済</th>
+                    <th className="px-4 py-3 font-semibold">出場内容</th>
+                    <th className="px-4 py-3 font-semibold">支払</th>
                     <th className="px-4 py-3 font-semibold">受付</th>
                     <th className="px-4 py-3 font-semibold">作成日時</th>
                     <th className="px-4 py-3 font-semibold">操作</th>
@@ -1335,6 +1777,9 @@ export function AdminEntriesManager({
                       </td>
                       <td className="px-4 py-4">
                         <p className="font-semibold text-white">{entry.name}</p>
+                        {entry.status === "cancelled" ? (
+                          <StatusBadge label="取消済み" tone="danger" />
+                        ) : null}
                         <p className="mt-1 text-xs text-zinc-500">{entry.kana}</p>
                         <p className="mt-1 text-xs text-zinc-500">{entry.email}</p>
                       </td>
@@ -1343,12 +1788,14 @@ export function AdminEntriesManager({
                         {entryTypeLabels[entry.entryType]}
                       </td>
                       <td className="px-4 py-4 text-zinc-300">
-                        {getWeightClassName(entry)}
+                        <EntryDivisionLines entry={entry} />
                       </td>
                       <td className="px-4 py-4">
-                        <StatusBadge
-                          label={paymentStatusLabels[entry.paymentStatus]}
-                          tone={paymentStatusTones[entry.paymentStatus]}
+                        <EntryPaymentSummary
+                          entry={entry}
+                          canRecordPayment={canRecordPayment}
+                          isRecording={recordingEntryIds.includes(entry.entryId)}
+                          onRecordPayment={(target) => void recordPayment(target)}
                         />
                       </td>
                       <td className="px-4 py-4 text-zinc-300">

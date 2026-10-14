@@ -15,12 +15,33 @@ import {
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import {
-  buildEntryDocumentId,
-  calculateAgeOnDate,
-  maskEmail,
-  normalizeEmail,
-} from "@/lib/entries/entry-validation";
-import { getSiteUrl } from "@/lib/site-url";
+  ATHLETE_CLASS_LABELS,
+  DIVISION_LABELS,
+  DIVISION_SELECTION_LABELS,
+  PROVISIONAL_SETTINGS,
+  calculateEntryFees,
+  getGenderLabel,
+  getOpenClassLabel,
+  getSelectedDivisions,
+  isAthleteClass,
+  isDivisionSelection,
+  type AthleteInput,
+} from "@/lib/entries/entry-divisions";
+import {
+  clearEntryDraft,
+  readEntryDraft,
+  saveEntryCompletion,
+  type EntryCompletion,
+  type EntryDraft,
+} from "@/lib/entries/entry-storage";
+import { calculateAgeOnDate, maskEmail } from "@/lib/entries/entry-validation";
+import {
+  PAYMENT_METHOD_DESCRIPTIONS,
+  PAYMENT_METHOD_LABELS,
+  formatPaymentDueDate,
+  getAvailablePaymentMethods,
+  type PaymentMethod,
+} from "@/lib/payments/payment-methods";
 import {
   getCurrentEntryFee,
   mapPublicEvent,
@@ -28,52 +49,7 @@ import {
 } from "@/features/events/public-event-utils";
 import type { EntryType } from "@/types/entry";
 
-const ENTRY_DRAFT_STORAGE_KEY = "alma-entry-draft";
-
-type AthleteDraft = {
-  name: string;
-  kana: string;
-  gender: string;
-  birthDate: string;
-  category: string;
-  ageCategory: string;
-  weightClass: string;
-  openClass: string;
-};
-
-type EntryDraftValues = {
-  name: string;
-  kana: string;
-  email: string;
-  phone: string;
-  gym: string;
-  postalCode: string;
-  prefecture: string;
-  city: string;
-  addressLine: string;
-  representativeName: string;
-  representativeEmail: string;
-  representativePhone: string;
-  representativeGym: string;
-  representativePostalCode: string;
-  representativePrefecture: string;
-  representativeCity: string;
-  representativeAddressLine: string;
-  gender: string;
-  birthDate: string;
-  category: string;
-  ageCategory: string;
-  weightClass: string;
-  openClass: string;
-  athletes: AthleteDraft[];
-};
-
-type EntryDraft = {
-  eventId: string;
-  entryType: EntryType;
-  values: EntryDraftValues;
-  savedAt: string;
-};
+import { EntryFeeBreakdown } from "./entry-fee-breakdown";
 
 type EntryConfirmationPageProps = {
   eventId: string;
@@ -100,38 +76,6 @@ function formatDateText(value: string) {
   }).format(parsed);
 }
 
-function getStorageKey(eventId: string) {
-  return `${ENTRY_DRAFT_STORAGE_KEY}:${eventId}`;
-}
-
-function readDraft(eventId: string): EntryDraft | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const raw = window.sessionStorage.getItem(getStorageKey(eventId));
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<EntryDraft> | null;
-    if (
-      !parsed ||
-      parsed.eventId !== eventId ||
-      (parsed.entryType !== "individual" && parsed.entryType !== "representative") ||
-      typeof parsed.savedAt !== "string" ||
-      !parsed.values
-    ) {
-      return null;
-    }
-
-    return parsed as EntryDraft;
-  } catch {
-    return null;
-  }
-}
-
 function getEntryTypeLabel(entryType: EntryType) {
   return entryType === "representative" ? "代表者エントリー" : "個人エントリー";
 }
@@ -139,15 +83,11 @@ function getEntryTypeLabel(entryType: EntryType) {
 function getApplicantName(draft: EntryDraft) {
   return draft.entryType === "representative"
     ? draft.values.representativeName
-    : draft.values.name;
+    : (draft.values.athletes[0]?.name ?? "");
 }
 
 function getApplicantKana(draft: EntryDraft) {
-  if (draft.entryType === "representative") {
-    return draft.values.athletes[0]?.kana ?? "-";
-  }
-
-  return draft.values.kana || "-";
+  return draft.values.athletes[0]?.kana || "-";
 }
 
 function getApplicantEmail(draft: EntryDraft) {
@@ -192,43 +132,12 @@ function getApplicantAddressLine(draft: EntryDraft) {
     : draft.values.addressLine;
 }
 
-function getApplicantBirthDate(draft: EntryDraft) {
-  return draft.entryType === "representative"
-    ? (draft.values.athletes[0]?.birthDate ?? "")
-    : draft.values.birthDate;
-}
-
-function getAthletes(draft: EntryDraft) {
-  return draft.entryType === "representative" ? draft.values.athletes : [draft.values];
-}
-
-function getEntryCategories(draft: EntryDraft) {
-  const athletes = getAthletes(draft);
-  return athletes
-    .map((athlete) => athlete.category)
-    .filter(Boolean)
-    .join(" / ");
-}
-
 function formatBirthDate(value: string) {
   return value ? formatDateText(value) : "-";
 }
 
 function formatAge(value: number | null) {
   return value === null ? "-" : `${value}歳`;
-}
-
-function getApplicantCalculatedAge(draft: EntryDraft, eventDate: Date | null) {
-  if (!eventDate) {
-    return null;
-  }
-
-  const birthDate = getApplicantBirthDate(draft);
-  if (!birthDate) {
-    return null;
-  }
-
-  return calculateAgeOnDate(birthDate, eventDate);
 }
 
 function getAthleteCalculatedAge(birthDate: string, eventDate: Date | null) {
@@ -239,20 +148,16 @@ function getAthleteCalculatedAge(birthDate: string, eventDate: Date | null) {
   return calculateAgeOnDate(birthDate, eventDate);
 }
 
-function buildValidationApplicants(draft: EntryDraft) {
-  if (draft.entryType === "representative") {
-    return draft.values.athletes.map((athlete) => ({
-      birthDate: athlete.birthDate,
-      ageCategory: athlete.ageCategory,
-    }));
-  }
+function getAthleteClassLabel(athlete: AthleteInput) {
+  return isAthleteClass(athlete.athleteClass)
+    ? ATHLETE_CLASS_LABELS[athlete.athleteClass]
+    : "-";
+}
 
-  return [
-    {
-      birthDate: draft.values.birthDate,
-      ageCategory: draft.values.ageCategory,
-    },
-  ];
+function getDivisionSelectionLabel(athlete: AthleteInput) {
+  return isDivisionSelection(athlete.divisionSelection)
+    ? DIVISION_SELECTION_LABELS[athlete.divisionSelection]
+    : "-";
 }
 
 function SummaryRow({
@@ -301,6 +206,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
     Array<{ field: string; message: string; code: string }>
   >([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<PaymentMethod | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -312,7 +219,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
       setValidationErrors([]);
 
       try {
-        const storedDraft = readDraft(eventId);
+        const storedDraft = readEntryDraft(eventId);
         if (!storedDraft) {
           throw new Error(
             "確認用の入力内容が見つかりません。入力画面からやり直してください。",
@@ -360,13 +267,24 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
   }, [eventId]);
 
   const pricing = event ? getCurrentEntryFee(event) : null;
-  const athletes = useMemo(() => (draft ? getAthletes(draft) : []), [draft]);
-  const totalAmount = (pricing?.entryFee ?? 0) * Math.max(athletes.length, 1);
+  const athletes = useMemo(() => (draft ? draft.values.athletes : []), [draft]);
+  const totalAmount = calculateEntryFees(pricing?.entryFee ?? 0, athletes).totalAmount;
   const eventDate = event?.eventDate ?? null;
   const editHref =
     draft?.entryType === "representative"
       ? `/events/${eventId}/entry/representative`
       : `/events/${eventId}/entry/individual`;
+  // 大会で有効になっている支払方法だけを表示する。1 つだけの場合はそれを選択済みにする。
+  const availablePaymentMethods = useMemo(
+    () => (event ? getAvailablePaymentMethods(event.paymentSettings) : []),
+    [event],
+  );
+  const paymentMethod: PaymentMethod | null =
+    selectedPaymentMethod && availablePaymentMethods.includes(selectedPaymentMethod)
+      ? selectedPaymentMethod
+      : availablePaymentMethods.length === 1
+        ? availablePaymentMethods[0]
+        : null;
 
   async function proceedToStripe() {
     if (!draft || !event) {
@@ -376,7 +294,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
 
     const values = draft.values;
     const isRepresentative = draft.entryType === "representative";
-    const resolvedAthletes = getAthletes(draft);
+    const resolvedAthletes = draft.values.athletes;
     const firstAthlete = resolvedAthletes[0];
 
     if (!firstAthlete) {
@@ -389,12 +307,16 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
       return;
     }
 
+    if (!paymentMethod) {
+      setError("お支払い方法を選択してください。");
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
     setValidationStage(null);
     setValidationErrors([]);
 
-    const applicantName = getApplicantName(draft);
     const applicantEmail = getApplicantEmail(draft);
     const applicantPhone = getApplicantPhone(draft);
     const applicantGym = getApplicantGym(draft);
@@ -404,7 +326,11 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
     const applicantAddressLine = getApplicantAddressLine(draft);
     const athleteCount = resolvedAthletes.length;
     const pricingNow = getCurrentEntryFee(event);
-    const totalAmountNow = pricingNow.entryFee * athleteCount;
+    // 画面に表示している金額。サーバー側で同じ式から再計算し、不一致なら決済へ進まない。
+    const totalAmountNow = calculateEntryFees(
+      pricingNow.entryFee,
+      resolvedAthletes,
+    ).totalAmount;
 
     try {
       const validationResponse = await fetch("/api/entries/validate", {
@@ -416,7 +342,7 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           eventId,
           email: applicantEmail,
           entryType: draft.entryType,
-          applicants: buildValidationApplicants(draft),
+          athletes: resolvedAthletes,
         }),
       });
 
@@ -456,38 +382,23 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
         );
       }
 
-      const normalizedApplicantEmail =
-        validationData?.normalizedEmail ?? normalizeEmail(applicantEmail);
-      const entryId = buildEntryDocumentId(eventId, normalizedApplicantEmail);
-      const successUrl = `${getSiteUrl()}/payment/success?entry_id=${entryId}&session_id={CHECKOUT_SESSION_ID}&applicant_name=${encodeURIComponent(applicantName)}&applicant_email=${encodeURIComponent(applicantEmail)}&event_id=${encodeURIComponent(eventId)}&event_title=${encodeURIComponent(event.title)}&entry_type=${encodeURIComponent(draft.entryType)}`;
-      const cancelUrl = `${getSiteUrl()}/payment/cancel?entry_id=${entryId}`;
-
+      // 申込の保存・料金の確定・決済ページの作成は、すべてサーバーが行う。
       const response = await fetch("/api/payments/checkout-session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          entryId,
           eventId,
-          eventTitle: event.title,
           entryType: draft.entryType,
-          name: applicantName,
-          kana: isRepresentative ? firstAthlete.kana : values.kana,
+          paymentMethod,
           email: applicantEmail,
-          normalizedEmail: normalizedApplicantEmail,
           phone: applicantPhone,
           gym: applicantGym,
-          gender: isRepresentative ? firstAthlete.gender : values.gender,
-          birthDate: firstAthlete.birthDate,
           postalCode: applicantPostalCode,
           prefecture: applicantPrefecture,
           city: applicantCity,
           addressLine: applicantAddressLine,
-          category: isRepresentative ? firstAthlete.category : values.category,
-          ageCategory: isRepresentative ? firstAthlete.ageCategory : values.ageCategory,
-          weightClass: isRepresentative ? firstAthlete.weightClass : values.weightClass,
-          openClass: isRepresentative ? firstAthlete.openClass : values.openClass,
           representative: isRepresentative
             ? {
                 name: values.representativeName,
@@ -500,13 +411,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                 addressLine: values.representativeAddressLine,
               }
             : undefined,
-          athletes: isRepresentative ? values.athletes : undefined,
+          athletes: resolvedAthletes,
           amount: totalAmountNow,
-          currency: "JPY",
-          itemName: `COPA ALMA エントリー費（${pricingNow.label} / ${athleteCount}名）`,
-          customerEmail: applicantEmail,
-          successUrl,
-          cancelUrl,
         }),
       });
 
@@ -521,25 +427,22 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
         }>;
         url?: string;
         sessionId?: string;
-        stripe?: {
-          debug?: {
-            testMode?: boolean;
-          };
-          isConfigured?: boolean;
-          isTestMode?: boolean;
-          missingKeys?: string[];
-          warnings?: string[];
-        };
+        entryId?: string;
+        completion?: EntryCompletion;
       };
+      const isCard = paymentMethod === "card";
+      const isCompleted = isCard
+        ? Boolean(data.url && data.sessionId)
+        : Boolean(data.entryId && data.completion);
 
-      if (!response.ok || !data.url || !data.sessionId) {
+      if (!response.ok || !isCompleted) {
         setValidationStage(data.stage ?? "unexpected_error");
         if (data.fieldErrors) {
           setValidationErrors(data.fieldErrors);
         }
         console.error("Checkout session creation failed after validation", {
           stage: data.stage ?? "unexpected_error",
-          message: data.message ?? data.error ?? "決済ページの作成に失敗しました。",
+          message: data.message ?? data.error ?? "お申し込みの処理に失敗しました。",
           validationResult: data,
           formData: {
             eventId,
@@ -549,18 +452,28 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
           },
         });
         throw new Error(
-          data.message ?? data.error ?? "決済ページの作成に失敗しました。",
+          data.message ?? data.error ?? "お申し込みの処理に失敗しました。",
         );
       }
 
-      window.location.href = data.url;
+      if (isCard && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+
+      // 銀行振込・現金払い: 未払いのまま受付完了。受付完了画面で支払案内を表示する。
+      if (data.completion && data.entryId) {
+        saveEntryCompletion(data.completion);
+        clearEntryDraft(eventId);
+        window.location.href = `/entry/accepted?entry_id=${encodeURIComponent(data.entryId)}`;
+      }
     } catch (caughtError) {
       const message =
         caughtError instanceof Error
           ? caughtError.message
-          : "Stripe Checkoutの作成に失敗しました。";
+          : "お申し込みの処理に失敗しました。";
 
-      console.error("確認ページからの決済開始に失敗しました", {
+      console.error("確認ページからの申込に失敗しました", {
         eventId,
         eventTitle: event.title,
         entryType: draft.entryType,
@@ -579,14 +492,6 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
         { label: "フリガナ", value: getApplicantKana(draft) },
         { label: "電話番号", value: getApplicantPhone(draft) },
         { label: "申込区分", value: getEntryTypeLabel(draft.entryType) },
-        ...(draft.entryType === "individual"
-          ? [
-              {
-                label: "計算年齢",
-                value: formatAge(getApplicantCalculatedAge(draft, eventDate)),
-              },
-            ]
-          : []),
         { label: "合計金額", value: formatYen(totalAmount) },
       ]
     : [];
@@ -615,8 +520,8 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
             エントリー内容確認
           </h1>
           <p className="mt-4 max-w-4xl text-sm leading-7 text-zinc-300 sm:text-base sm:leading-8">
-            入力内容を確認してからStripe決済へ進みます。修正が必要な場合は入力画面へ戻り、
-            この内容で問題なければ決済へ進んでください。
+            入力内容とお支払い方法を確認してからお申し込みください。修正が必要な場合は入力画面へ戻り、
+            この内容で問題なければお手続きへ進んでください。
           </p>
 
           {error ? (
@@ -679,12 +584,6 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                     fullWidth
                     valueClassName="break-words"
                   />
-                  <SummaryRow
-                    label="出場カテゴリー"
-                    value={getEntryCategories(draft)}
-                    fullWidth
-                    valueClassName="break-words"
-                  />
                 </div>
 
                 <div className="mt-5 rounded-md border border-white/10 bg-white/[0.03] p-4">
@@ -702,112 +601,186 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                 <div className="mt-5 space-y-4">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[0.2em] text-alma-gold/90">
-                      その他必要な入力項目
+                      選手・出場内容
                     </p>
                   </div>
 
                   {draft.entryType === "representative" ? (
-                    <>
-                      <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-                        <p className="text-sm font-bold text-white">代表者情報</p>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <SummaryRow
-                            label="代表者氏名"
-                            value={draft.values.representativeName}
-                          />
-                          <SummaryRow
-                            label="代表者メールアドレス"
-                            value={draft.values.representativeEmail}
-                            fullWidth
-                            valueClassName="break-all"
-                          />
-                          <SummaryRow
-                            label="代表者電話番号"
-                            value={draft.values.representativePhone}
-                          />
-                          <SummaryRow
-                            label="代表者所属"
-                            value={draft.values.representativeGym}
-                            fullWidth
-                          />
-                        </div>
-                      </div>
-
-                      {draft.values.athletes.map((athlete, index) => (
-                        <div
-                          key={`${athlete.name}-${index}`}
-                          className="rounded-md border border-white/10 bg-white/[0.03] p-4"
-                        >
-                          <p className="text-sm font-bold text-white">
-                            選手 {index + 1}
-                          </p>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                            <SummaryRow label="氏名" value={athlete.name} />
-                            <SummaryRow label="フリガナ" value={athlete.kana} />
-                            <SummaryRow label="性別" value={athlete.gender} />
-                          <SummaryRow
-                            label="生年月日"
-                            value={formatBirthDate(athlete.birthDate)}
-                          />
-                          <SummaryRow
-                            label="計算年齢"
-                            value={formatAge(
-                              getAthleteCalculatedAge(athlete.birthDate, eventDate),
-                            )}
-                          />
-                            <SummaryRow
-                              label="出場カテゴリー"
-                              value={athlete.category}
-                              fullWidth
-                            />
-                          <SummaryRow
-                            label="年齢カテゴリー"
-                            value={athlete.ageCategory}
-                            fullWidth
-                          />
-                            <SummaryRow label="階級" value={athlete.weightClass} />
-                            <SummaryRow
-                              label="無差別級"
-                              value={
-                                athlete.openClass === "yes" ? "参加する" : "参加しない"
-                              }
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </>
-                  ) : (
                     <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <SummaryRow label="性別" value={draft.values.gender} />
+                      <p className="text-sm font-bold text-white">代表者情報</p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <SummaryRow
+                          label="代表者氏名"
+                          value={draft.values.representativeName}
+                        />
+                        <SummaryRow
+                          label="代表者メールアドレス"
+                          value={draft.values.representativeEmail}
+                          fullWidth
+                          valueClassName="break-all"
+                        />
+                        <SummaryRow
+                          label="代表者電話番号"
+                          value={draft.values.representativePhone}
+                        />
+                        <SummaryRow
+                          label="代表者所属"
+                          value={draft.values.representativeGym}
+                          fullWidth
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {athletes.map((athlete, index) => (
+                    <div
+                      key={`${athlete.name}-${index}`}
+                      className="rounded-md border border-white/10 bg-white/[0.03] p-4"
+                    >
+                      <p className="text-sm font-bold text-white">
+                        {draft.entryType === "representative"
+                          ? `選手 ${index + 1}`
+                          : "選手情報"}
+                      </p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <SummaryRow label="氏名" value={athlete.name} />
+                        <SummaryRow label="フリガナ" value={athlete.kana} />
+                        <SummaryRow
+                          label="性別"
+                          value={getGenderLabel(athlete.gender)}
+                        />
                         <SummaryRow
                           label="生年月日"
-                          value={formatBirthDate(draft.values.birthDate)}
+                          value={formatBirthDate(athlete.birthDate)}
                         />
                         <SummaryRow
                           label="計算年齢"
                           value={formatAge(
-                            getAthleteCalculatedAge(draft.values.birthDate, eventDate),
+                            getAthleteCalculatedAge(athlete.birthDate, eventDate),
                           )}
                         />
                         <SummaryRow
-                          label="出場カテゴリー"
-                          value={draft.values.category}
-                          fullWidth
+                          label="大人／キッズ"
+                          value={getAthleteClassLabel(athlete)}
                         />
+                        {athlete.athleteClass === "kids" ? (
+                          <SummaryRow label="保護者氏名" value={athlete.guardianName} />
+                        ) : null}
                         <SummaryRow
-                          label="年齢カテゴリー"
-                          value={draft.values.ageCategory}
-                          fullWidth
-                        />
-                        <SummaryRow label="階級" value={draft.values.weightClass} />
-                        <SummaryRow
-                          label="無差別級"
-                          value={
-                            draft.values.openClass === "yes" ? "参加する" : "参加しない"
-                          }
+                          label="出場部門"
+                          value={getDivisionSelectionLabel(athlete)}
                         />
                       </div>
+
+                      {getSelectedDivisions(athlete.divisionSelection).map(
+                        (division) => {
+                          const entry = athlete[division];
+
+                          return (
+                            <div
+                              key={division}
+                              className="mt-3 rounded-md border border-alma-gold/25 bg-black/20 p-3"
+                            >
+                              <p className="text-xs font-bold tracking-[0.2em] text-alma-gold">
+                                {DIVISION_LABELS[division]}
+                              </p>
+                              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                <SummaryRow
+                                  label="年齢区分"
+                                  value={entry.ageCategory}
+                                />
+                                <SummaryRow
+                                  label={
+                                    athlete.athleteClass === "kids"
+                                      ? `階級（${PROVISIONAL_SETTINGS.kidsWeightNote}）`
+                                      : "階級"
+                                  }
+                                  value={entry.weightClass}
+                                />
+                                {division === "gi" ? (
+                                  <SummaryRow label="帯色" value={athlete.gi.belt} />
+                                ) : (
+                                  <SummaryRow
+                                    label="グレード"
+                                    value={athlete.nogi.grade}
+                                  />
+                                )}
+                                {athlete.athleteClass === "adult" ? (
+                                  <SummaryRow
+                                    label="無差別級"
+                                    value={getOpenClassLabel(entry.openClass)}
+                                  />
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        },
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-md border border-alma-gold/25 bg-[linear-gradient(135deg,rgba(214,173,69,0.12),rgba(255,255,255,0.03))] p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-alma-gold">
+                    料金内訳
+                  </p>
+                  <div className="mt-3">
+                    <EntryFeeBreakdown
+                      entryFee={pricing?.entryFee ?? 0}
+                      priceLabel={pricing?.label ?? ""}
+                      athletes={athletes}
+                      showAthleteHeadings={draft.entryType === "representative"}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-md border border-alma-gold/25 bg-black/30 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.2em] text-alma-gold">
+                    お支払い方法
+                  </p>
+                  {availablePaymentMethods.length === 0 ? (
+                    <p className="mt-3 text-sm leading-6 text-red-200">
+                      現在選択できるお支払い方法がありません。お手数ですが運営までお問い合わせください。
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {availablePaymentMethods.map((method) => (
+                        <label
+                          key={method}
+                          className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition ${
+                            paymentMethod === method
+                              ? "border-alma-gold bg-alma-gold/10"
+                              : "border-white/10 bg-white/[0.03] hover:border-alma-gold/50"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="paymentMethod"
+                            value={method}
+                            checked={paymentMethod === method}
+                            onChange={() => setSelectedPaymentMethod(method)}
+                            className="mt-1 h-4 w-4 accent-alma-gold"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-bold text-white">
+                              {PAYMENT_METHOD_LABELS[method]}
+                            </span>
+                            <span className="mt-1 block text-xs leading-5 text-zinc-400">
+                              {PAYMENT_METHOD_DESCRIPTIONS[method]}
+                              {method === "bank_transfer" &&
+                              event.paymentSettings.bankTransfer.dueDate
+                                ? ` お支払い期限: ${formatPaymentDueDate(event.paymentSettings.bankTransfer.dueDate)}`
+                                : ""}
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                      <p className="text-xs leading-5 text-zinc-500">
+                        参加費はお申し込み時点の金額で確定します。お支払い日によって金額が変わることはありません。
+                        {draft.entryType === "representative"
+                          ? " 代表者エントリーは、全選手分をまとめて 1 つの方法でお支払いいただきます。"
+                          : ""}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -845,11 +818,19 @@ export function EntryConfirmationPage({ eventId }: EntryConfirmationPageProps) {
                     <button
                       type="button"
                       onClick={() => void proceedToStripe()}
-                      disabled={loading || isSubmitting || !draft || !event}
+                      disabled={
+                        loading || isSubmitting || !draft || !event || !paymentMethod
+                      }
                       className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-alma-gold px-6 py-3 text-sm font-bold text-black transition hover:bg-[#d7b760] disabled:cursor-not-allowed disabled:opacity-55 sm:w-auto"
                     >
                       <TrophyIcon size={16} />
-                      {isSubmitting ? "Stripeへ進行中..." : "この内容で決済へ進む"}
+                      {isSubmitting
+                        ? "お手続き中..."
+                        : paymentMethod === "card"
+                          ? "この内容で決済へ進む"
+                          : paymentMethod
+                            ? "この内容で申し込む"
+                            : "お支払い方法を選択してください"}
                     </button>
                   </div>
                 </div>

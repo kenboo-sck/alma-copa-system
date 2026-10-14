@@ -114,6 +114,12 @@ function getEntryTypeLabel(entryType: EntryEmailPayload["entryType"]) {
   return entryType === "individual" ? "個人エントリー" : "代表者エントリー";
 }
 
+function formatTotalAmount(totalAmount: number | undefined) {
+  return typeof totalAmount === "number" && totalAmount > 0
+    ? `${totalAmount.toLocaleString("ja-JP")}円`
+    : "";
+}
+
 function buildApplicantEmail(payload: EntryEmailPayload) {
   const subject = `【COPA ALMA】エントリー受付完了: ${payload.eventTitle}`;
   const applicantName = escapeHtml(payload.applicantName);
@@ -121,14 +127,63 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
   const entryTypeLabel = getEntryTypeLabel(payload.entryType);
   const contactEmail = "info@copa-alma.com";
   const logoUrl = getLogoUrl();
+  const entryDetailLines = payload.entryDetailLines ?? [];
+  const totalAmountText = formatTotalAmount(payload.totalAmount);
+  const amountLabel = payload.amountLabel ?? "お支払い金額";
+  const paymentMethodLabel = payload.paymentMethodLabel ?? "";
+  const paymentGuidance = payload.paymentGuidance ?? [];
+  const isUnpaid = payload.paymentStatus !== "paid";
+  const detailCellLabelStyle =
+    "padding:12px 0;border-top:1px solid #2c2c2c;color:#9f9a90;font-size:13px;line-height:1.6;width:34%;";
+  const detailCellValueStyle =
+    "padding:12px 0;border-top:1px solid #2c2c2c;color:#ffffff;font-size:15px;line-height:1.6;font-weight:700;";
+  const entryDetailRowsHtml = [
+    entryDetailLines.length > 0
+      ? `<tr>
+                                    <td valign="top" style="${detailCellLabelStyle}">出場内容</td>
+                                    <td style="${detailCellValueStyle}">${entryDetailLines.map((line) => escapeHtml(line)).join("<br>")}</td>
+                                  </tr>`
+      : "",
+    paymentMethodLabel
+      ? `<tr>
+                                    <td style="${detailCellLabelStyle}">お支払い方法</td>
+                                    <td style="${detailCellValueStyle}">${escapeHtml(paymentMethodLabel)}</td>
+                                  </tr>`
+      : "",
+    totalAmountText
+      ? `<tr>
+                                    <td style="${detailCellLabelStyle}">${escapeHtml(amountLabel)}</td>
+                                    <td style="${detailCellValueStyle}">${escapeHtml(totalAmountText)}</td>
+                                  </tr>`
+      : "",
+    ...paymentGuidance.map(
+      (section) => `<tr>
+                                    <td valign="top" style="${detailCellLabelStyle}">${escapeHtml(section.label)}</td>
+                                    <td style="${detailCellValueStyle}">${textToHtml(section.value)}</td>
+                                  </tr>`,
+    ),
+  ].join("");
+  const paymentNoticeText = isUnpaid
+    ? "参加費のお支払いはまだ完了していません。下記のご案内に沿ってお支払いをお願いいたします。"
+    : "";
   const text = [
     `${payload.applicantName} 様`,
     "",
     "この度はCOPA ALMAへエントリーいただき、誠にありがとうございます。",
     "大会運営にて、以下の内容でエントリーを受付いたしました。",
+    paymentNoticeText,
     "",
     `大会名: ${payload.eventTitle}`,
     `申込区分: ${entryTypeLabel}`,
+    ...(entryDetailLines.length > 0
+      ? ["出場内容:", ...entryDetailLines.map((line) => `  ${line}`)]
+      : []),
+    paymentMethodLabel ? `お支払い方法: ${paymentMethodLabel}` : "",
+    totalAmountText ? `${amountLabel}: ${totalAmountText}` : "",
+    ...paymentGuidance.flatMap((section) => [
+      `${section.label}:`,
+      ...section.value.split("\n").map((line) => `  ${line}`),
+    ]),
     "",
     "今後の流れ",
     "1. 大会当日に向け、運営より順次ご案内をお送りいたします。",
@@ -185,7 +240,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
                                 <h1 style="margin:0;color:#ffffff;font-size:30px;line-height:1.35;font-weight:700;letter-spacing:0;">エントリーを受付いたしました</h1>
                                 <p style="margin:18px 0 0 0;color:#d9d2c2;font-size:15px;line-height:1.9;">
                                   ${applicantName} 様<br>
-                                  この度はCOPA ALMAへエントリーいただき、誠にありがとうございます。大会運営にて、以下の内容でしっかりと受付いたしました。
+                                  この度はCOPA ALMAへエントリーいただき、誠にありがとうございます。大会運営にて、以下の内容でしっかりと受付いたしました。${paymentNoticeText ? `<br>${escapeHtml(paymentNoticeText)}` : ""}
                                 </p>
                               </td>
                             </tr>
@@ -213,6 +268,7 @@ function buildApplicantEmail(payload: EntryEmailPayload) {
                                     <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#9f9a90;font-size:13px;line-height:1.6;width:34%;">申込区分</td>
                                     <td style="padding:12px 0;border-top:1px solid #2c2c2c;color:#ffffff;font-size:15px;line-height:1.6;font-weight:700;">${entryTypeLabel}</td>
                                   </tr>
+                                  ${entryDetailRowsHtml}
                                 </table>
                               </td>
                             </tr>
@@ -282,12 +338,21 @@ function buildAdminEmail(payload: EntryEmailPayload) {
   const text = [
     "管理者各位",
     "",
-    "新しいエントリーが完了しました。",
+    payload.paymentStatus === "paid"
+      ? "新しいエントリーが完了しました。"
+      : "新しいエントリーを受け付けました（お支払いは未完了です）。",
     `大会名: ${payload.eventTitle}`,
     `申込者: ${payload.applicantName}`,
     `メール: ${payload.applicantEmail}`,
     `申込種別: ${getEntryTypeLabel(payload.entryType)}`,
-    `決済状態: ${payload.paymentStatus}`,
+    ...((payload.entryDetailLines ?? []).length > 0
+      ? ["出場内容:", ...(payload.entryDetailLines ?? []).map((line) => `  ${line}`)]
+      : []),
+    formatTotalAmount(payload.totalAmount)
+      ? `合計金額: ${formatTotalAmount(payload.totalAmount)}`
+      : "",
+    payload.paymentMethodLabel ? `支払方法: ${payload.paymentMethodLabel}` : "",
+    `支払状態: ${payload.paymentStatusLabel ?? payload.paymentStatus}`,
     payload.sessionId ? `Stripe Session ID: ${payload.sessionId}` : "",
     `Entry ID: ${payload.entryId}`,
   ]
@@ -303,7 +368,10 @@ function buildAdminEmail(payload: EntryEmailPayload) {
         <li>申込者: ${escapeHtml(payload.applicantName)}</li>
         <li>メール: ${escapeHtml(payload.applicantEmail)}</li>
         <li>申込種別: ${getEntryTypeLabel(payload.entryType)}</li>
-        <li>決済状態: ${escapeHtml(payload.paymentStatus)}</li>
+        ${(payload.entryDetailLines ?? []).map((line) => `<li>出場内容: ${escapeHtml(line)}</li>`).join("")}
+        ${formatTotalAmount(payload.totalAmount) ? `<li>合計金額: ${escapeHtml(formatTotalAmount(payload.totalAmount))}</li>` : ""}
+        ${payload.paymentMethodLabel ? `<li>支払方法: ${escapeHtml(payload.paymentMethodLabel)}</li>` : ""}
+        <li>支払状態: ${escapeHtml(payload.paymentStatusLabel ?? payload.paymentStatus)}</li>
         ${payload.sessionId ? `<li>Stripe Session ID: ${escapeHtml(payload.sessionId)}</li>` : ""}
         <li>Entry ID: ${escapeHtml(payload.entryId)}</li>
       </ul>

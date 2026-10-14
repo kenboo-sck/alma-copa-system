@@ -8,6 +8,7 @@ export const defaultRolePermissions = {
     "entries:read",
     "entries:write",
     "payments:read",
+    "payments:write",
     "emails:read",
     "emails:send",
     "reception:write",
@@ -21,11 +22,13 @@ export const defaultRolePermissions = {
     "entries:read",
     "entries:write",
     "payments:read",
+    "payments:write",
     "emails:read",
     "emails:send",
     "reception:write",
     "weigh-in:write",
   ],
+  // 受付担当には入金・現金受領の記録（payments:write）を含めていない。
   staff: ["entries:read", "reception:write", "weigh-in:write"],
 } as const;
 
