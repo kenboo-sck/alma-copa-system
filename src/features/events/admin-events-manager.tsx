@@ -16,6 +16,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useAdminAuth } from "@/features/admin-auth";
+import { hasEventWritePermission } from "@/lib/auth";
 import { db, storage } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import type { EventStatus } from "@/types/event";
@@ -56,6 +58,9 @@ async function uploadEventMainImage(eventId: string, imageFile: File) {
 }
 
 export function AdminEventsManager() {
+  const { adminUser } = useAdminAuth();
+  // エントリーリストの公開設定は、大会の編集権限がある管理者だけが変更できる。
+  const canChangeEntryListPublic = adminUser ? hasEventWritePermission(adminUser) : false;
   const [rawEvents, setRawEvents] = useState<AdminEvent[]>([]);
   const [entryCounts, setEntryCounts] = useState<Record<string, number>>({});
   const [editingEvent, setEditingEvent] = useState<AdminEvent | null>(null);
@@ -352,6 +357,7 @@ export function AdminEventsManager() {
           key={editingEvent?.id ?? "new"}
           event={editingEvent}
           isSaving={isSaving}
+          canChangeEntryListPublic={canChangeEntryListPublic}
           onClose={closeForm}
           onSubmit={saveEvent}
         />

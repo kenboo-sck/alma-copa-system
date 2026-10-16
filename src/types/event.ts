@@ -21,6 +21,8 @@ export type EventDocument = {
   lateStartAt: Date;
   lateEndAt: Date;
   status: EventStatus;
+  // エントリーリストの一般公開。未設定（既存の大会）は非公開として扱う。
+  entryListPublic?: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt?: Date | null;

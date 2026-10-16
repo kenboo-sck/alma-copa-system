@@ -31,6 +31,8 @@ export type PublicEvent = {
   status: EventStatus;
   // 大会ごとの支払設定。設定がない既存の大会はカードのみ。
   paymentSettings: EventPaymentSettings;
+  // エントリーリストの一般公開。設定のない既存の大会は非公開。
+  entryListPublic: boolean;
   aboutSection: {
     enabled: boolean;
     concept: string;
@@ -117,6 +119,7 @@ export function mapPublicEvent(id: string, data: DocumentData): PublicEvent {
     status:
       data.status === "published" || data.status === "closed" ? data.status : "draft",
     paymentSettings: getEventPaymentSettings(data),
+    entryListPublic: data.entryListPublic === true,
     aboutSection: {
       enabled: aboutSection.enabled === true,
       concept: typeof aboutSection.concept === "string" ? aboutSection.concept : "",

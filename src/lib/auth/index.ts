@@ -35,3 +35,12 @@ export const defaultRolePermissions = {
 export function canManageEvents(role: AdminRole) {
   return role === "owner" || role === "admin";
 }
+
+// 大会の編集権限（events:write）があるか。オーナーは常に可能
+// （サーバー側の requireAdmin と同じ判定。firestore.rules の canEditEvents とも揃える）。
+export function hasEventWritePermission(user: {
+  role: AdminRole;
+  permissions: readonly string[];
+}) {
+  return user.role === "owner" || user.permissions.includes("events:write");
+}

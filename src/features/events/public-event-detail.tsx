@@ -292,6 +292,14 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                   ENTRY CLOSED
                 </button>
               )}
+              {event.entryListPublic ? (
+                <Link
+                  href={`/events/${event.id}/entry-list`}
+                  className="inline-flex min-h-12 w-full items-center justify-center rounded-md border border-alma-gold/60 bg-black/30 px-6 py-3 text-sm font-bold tracking-[0.12em] text-alma-gold transition hover:bg-alma-gold/10 sm:w-auto"
+                >
+                  エントリーリスト
+                </Link>
+              ) : null}
               <span className="text-xs font-semibold uppercase tracking-[0.22em] text-zinc-400">
                 COPA ALMA Official Event
               </span>
@@ -459,6 +467,25 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                 受付期間外の場合はエントリー不可です。公開中であっても、受付終了後は申込できません。
               </p>
             </div>
+
+            {event.entryListPublic ? (
+              <Link
+                href={`/events/${event.id}/entry-list`}
+                className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-4 transition hover:border-alma-gold/60"
+              >
+                <span>
+                  <span className="block text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold/90">
+                    Entry List
+                  </span>
+                  <span className="mt-1 block text-base font-bold text-white">
+                    エントリーリストを見る
+                  </span>
+                </span>
+                <span className="text-alma-gold" aria-hidden="true">
+                  →
+                </span>
+              </Link>
+            ) : null}
           </aside>
         </div>
       </section>

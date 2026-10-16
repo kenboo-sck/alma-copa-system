@@ -12,6 +12,29 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data.isActive == true;
     }
 
+    // 大会の編集権限（events:write）。オーナーは常に可能（サーバー側の requireAdminRequest と同じ判定）。
+    function canEditEvents() {
+      let adminData = get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data;
+      return isAdmin()
+        && (adminData.get("role", "") == "owner"
+          || "events:write" in adminData.get("permissions", []));
+    }
+
+    // エントリーリストの公開設定（entryListPublic）を変更・有効化できるのは、
+    // 大会の編集権限がある管理者だけ。エントリー自体の読み取りは一般に許可しない
+    // （公開用のリストはサーバーが必要な 3 項目だけを取り出して返す）。
+    function entryListPublicCreateAllowed() {
+      return request.resource.data.get("entryListPublic", false) != true || canEditEvents();
+    }
+
+    // 未設定は非公開（false）と同じに扱う。既存の大会をフォームで保存し直したときに
+    // false が書き込まれるだけなら、値は変わらないため権限は問わない。
+    function entryListPublicUpdateAllowed() {
+      return request.resource.data.get("entryListPublic", false)
+          == resource.data.get("entryListPublic", false)
+        || canEditEvents();
+    }
+
     function publicInquiryCreateAllowed(inquiryId) {
       let data = request.resource.data;
 
@@ -75,7 +98,9 @@ service cloud.firestore {
           resource.data.status == "published"
           && (!resource.data.keys().hasAny(["deletedAt"]) || resource.data.deletedAt == null)
         );
-      allow create, update, delete: if isAdmin();
+      allow create: if isAdmin() && entryListPublicCreateAllowed();
+      allow update: if isAdmin() && entryListPublicUpdateAllowed();
+      allow delete: if isAdmin();
     }
 
     match /eventCategories/{categoryId} {

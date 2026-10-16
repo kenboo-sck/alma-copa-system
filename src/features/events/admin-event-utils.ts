@@ -36,6 +36,7 @@ export const eventFormSchema = z
     bankNote: z.string().max(1000, "案内文は1000文字以内で入力してください。"),
     bankDueDate: z.string(),
     cashNote: z.string().max(1000, "案内文は1000文字以内で入力してください。"),
+    entryListPublic: z.boolean(),
     aboutSection: z.object({
       enabled: z.enum(["true", "false"]),
       concept: z.string().max(1200, "大会コンセプトは1200文字以内で入力してください。"),
@@ -140,6 +141,8 @@ export const defaultEventFormValues: EventFormValues = {
   bankNote: "",
   bankDueDate: "",
   cashNote: "",
+  // エントリーリストは初期状態では公開しない。
+  entryListPublic: false,
   aboutSection: {
     enabled: "false",
     concept: "",
@@ -248,6 +251,7 @@ export function mapEventData(
     status:
       data.status === "published" || data.status === "closed" ? data.status : "draft",
     paymentSettings: getEventPaymentSettings(data),
+    entryListPublic: data.entryListPublic === true,
     imageUrl:
       typeof data.imageUrl === "string"
         ? data.imageUrl
@@ -308,6 +312,7 @@ export function createEventPayload(values: EventFormValues) {
     cashPayment: {
       note: values.cashNote.trim(),
     },
+    entryListPublic: values.entryListPublic,
     aboutSection: {
       enabled: values.aboutSection.enabled === "true",
       concept: values.aboutSection.concept.trim(),
@@ -345,6 +350,7 @@ export function getEventFormValues(event: AdminEvent): EventFormValues {
     bankNote: event.paymentSettings.bankTransfer.note,
     bankDueDate: event.paymentSettings.bankTransfer.dueDate,
     cashNote: event.paymentSettings.cash.note,
+    entryListPublic: event.entryListPublic,
     aboutSection: {
       enabled: event.aboutSection.enabled ? "true" : "false",
       concept: event.aboutSection.concept,

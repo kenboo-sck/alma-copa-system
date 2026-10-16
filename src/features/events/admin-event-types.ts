@@ -21,6 +21,8 @@ export type AdminEvent = {
   status: EventStatus;
   // 支払設定。設定がない既存の大会はカードのみ。
   paymentSettings: EventPaymentSettings;
+  // エントリーリストの一般公開。設定のない既存の大会は非公開。
+  entryListPublic: boolean;
   imageUrl: string;
   imagePath: string;
   aboutSection: {
@@ -62,6 +64,7 @@ export type EventFormValues = {
   // 振込期限日（日本時間の "YYYY-MM-DD"。当日中を期限とする）。
   bankDueDate: string;
   cashNote: string;
+  entryListPublic: boolean;
   aboutSection: {
     enabled: "true" | "false";
     concept: string;

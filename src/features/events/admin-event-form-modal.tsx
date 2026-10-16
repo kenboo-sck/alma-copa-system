@@ -16,6 +16,8 @@ import {
 type AdminEventFormModalProps = {
   event: AdminEvent | null;
   isSaving: boolean;
+  // false の場合、エントリーリストの公開設定は表示のみ（変更不可）。
+  canChangeEntryListPublic: boolean;
   onClose: () => void;
   onSubmit: (values: EventFormValues, imageFile: File | null) => Promise<void>;
 };
@@ -25,6 +27,7 @@ const defaultEventImage = "/images/event-card-bg.jpg";
 export function AdminEventFormModal({
   event,
   isSaving,
+  canChangeEntryListPublic,
   onClose,
   onSubmit,
 }: AdminEventFormModalProps) {
@@ -44,6 +47,7 @@ export function AdminEventFormModal({
   const isAboutSectionEnabled = watch("aboutSection.enabled") === "true";
   const isBankTransferEnabled = watch("paymentBankTransfer");
   const isCashEnabled = watch("paymentCash");
+  const isEntryListPublic = watch("entryListPublic");
 
   useEffect(() => {
     reset(event ? getEventFormValues(event) : defaultEventFormValues);
@@ -230,6 +234,48 @@ export function AdminEventFormModal({
                 <option value="closed">closed（受付終了）</option>
               </select>
             </label>
+
+            <fieldset className="space-y-2 md:col-span-2">
+              <legend className="text-sm font-semibold text-zinc-200">
+                エントリーリスト
+              </legend>
+              <label
+                className={`flex items-start gap-3 rounded-md border border-white/10 bg-black px-4 py-3 text-sm text-zinc-200 transition ${
+                  canChangeEntryListPublic
+                    ? "cursor-pointer hover:border-alma-gold/70"
+                    : "cursor-not-allowed opacity-60"
+                }`}
+              >
+                {canChangeEntryListPublic ? (
+                  <input
+                    type="checkbox"
+                    {...register("entryListPublic")}
+                    className="mt-0.5 h-4 w-4 accent-alma-gold"
+                  />
+                ) : (
+                  // 権限がない場合は現在の設定を表示するだけ（フォームの値は変えない）。
+                  <input
+                    type="checkbox"
+                    checked={isEntryListPublic}
+                    disabled
+                    readOnly
+                    className="mt-0.5 h-4 w-4 accent-alma-gold"
+                  />
+                )}
+                <span>
+                  エントリーリストを公開する
+                  <span className="mt-1 block text-xs leading-5 text-zinc-500">
+                    公開すると、大会詳細ページにエントリーリストへのリンクを表示します。掲載するのは受付済みの申込の「カテゴリー・所属・名前」だけです。ステータスが
+                    published（公開中）の大会でのみ表示されます。
+                  </span>
+                  {!canChangeEntryListPublic ? (
+                    <span className="mt-1 block text-xs leading-5 text-amber-300">
+                      公開設定を変更できるのは、大会の編集権限がある管理者だけです。
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+            </fieldset>
 
             <div className="md:col-span-2 mt-2 border-t border-white/10 pt-5">
               <p className="text-xs font-semibold uppercase tracking-[0.28em] text-alma-gold">
