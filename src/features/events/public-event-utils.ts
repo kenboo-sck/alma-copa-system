@@ -135,8 +135,19 @@ export function mapPublicEvent(id: string, data: DocumentData): PublicEvent {
   };
 }
 
-function isWithinPeriod(now: Date, startAt: Date | null, endAt: Date | null) {
-  return Boolean(startAt && endAt && now >= startAt && now <= endAt);
+const MINUTE_MS = 60 * 1000;
+
+// 料金期間に含まれるか。期間は管理画面で分単位に設定するため、終了日時はその「分」の
+// 終わりまでを含める（例: 終了 23:59 → 23:59:59.999 まで）。次の期間の開始（翌 0:00）とは
+// 重ならず、境目に料金期間のない時間ができない。
+// 申込画面・確認画面・サーバーの料金計算と、大会詳細の「現在受付中」表示で共通に使う。
+export function isWithinPeriod(now: Date, startAt: Date | null, endAt: Date | null) {
+  if (!startAt || !endAt) {
+    return false;
+  }
+
+  const endExclusive = Math.floor(endAt.getTime() / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
+  return now.getTime() >= startAt.getTime() && now.getTime() < endExclusive;
 }
 
 export function getCurrentEntryFee(event: PublicEvent, now = new Date()) {

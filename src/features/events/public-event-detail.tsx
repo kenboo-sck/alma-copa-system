@@ -14,6 +14,7 @@ import {
   formatDateTime,
   getEventImageUrl,
   getEntryState,
+  isWithinPeriod,
   mapPublicEvent,
   toCssUrl,
   type PublicEvent,
@@ -102,13 +103,9 @@ function formatPeriod(startAt: Date | null, endAt: Date | null) {
   return `${formatDate(startAt)} 〜 ${formatDate(endAt)}`;
 }
 
+// 料金の判定（getCurrentEntryFee）と同じ基準で「現在受付中」を表示する。
 function isActivePeriod(startAt: Date | null, endAt: Date | null) {
-  if (!startAt || !endAt) {
-    return false;
-  }
-
-  const now = new Date();
-  return now >= startAt && now <= endAt;
+  return isWithinPeriod(new Date(), startAt, endAt);
 }
 
 export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
