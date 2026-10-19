@@ -20,6 +20,15 @@ service cloud.firestore {
           || "events:write" in adminData.get("permissions", []));
     }
 
+    // 申込の編集権限（entries:write）。オーナーは常に可能（サーバー側の requireAdminRequest と同じ判定）。
+    // 受付・計量だけを担当する管理者（reception:write など）は申込を削除できない。
+    function canWriteEntries() {
+      let adminData = get(/databases/$(database)/documents/adminUsers/$(request.auth.uid)).data;
+      return isAdmin()
+        && (adminData.get("role", "") == "owner"
+          || "entries:write" in adminData.get("permissions", []));
+    }
+
     // エントリーリストの公開設定（entryListPublic）を変更・有効化できるのは、
     // 大会の編集権限がある管理者だけ。エントリー自体の読み取りは一般に許可しない
     // （公開用のリストはサーバーが必要な 3 項目だけを取り出して返す）。
@@ -111,6 +120,7 @@ service cloud.firestore {
 
     // 変更履歴・入金や返金の記録がある申込、支払済みの申込は削除できない
     // （取消は「申込全体のキャンセル」で状態を残す）。
+    // 画面側の判定（src/lib/entries/entry-deletion.ts）と揃えること。
     function adminEntryDeleteAllowed() {
       return resource.data.paymentStatus != "paid"
         && resource.data.get("revision", 0) == 0
@@ -121,7 +131,7 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if false;
       allow update: if isAdmin() && adminEntryUpdateAllowed();
-      allow delete: if isAdmin() && adminEntryDeleteAllowed();
+      allow delete: if canWriteEntries() && adminEntryDeleteAllowed();
 
       // 金額の記録（台帳）と変更履歴。サーバー（Admin SDK）だけが追記し、
       // 管理者を含め、ブラウザからは作成・上書き・削除できない。

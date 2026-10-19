@@ -171,6 +171,21 @@ function isAcceptedUnpaidEntry(data: DataRecord) {
   );
 }
 
+// 同じ大会・同じメールアドレスでの新しい申込を受け付けない申込（有効な申込）。
+// キャンセル済みの申込は、記録が残っていても再申込を妨げない。
+function blocksReapplication(data: DataRecord) {
+  return (
+    data.entryStatus !== "cancelled" &&
+    (isPaidEntry(data) || isAcceptedUnpaidEntry(data) || hasAdminRecords(data))
+  );
+}
+
+// 新しい申込で上書きしてよい申込（カード決済の手続きが終わっていない申込など）。
+// 支払済みの申込や、変更・キャンセル・入金の記録がある申込は、記録を残すため上書きしない。
+function isOverwritableEntry(data: DataRecord) {
+  return !isPaidEntry(data) && !hasAdminRecords(data);
+}
+
 export async function createEntry(
   input: CreateEntryInput,
   now = new Date(),
@@ -263,8 +278,10 @@ export async function createEntry(
       ? input.representative.name
       : firstAthlete.name;
   const normalizedEmail = normalizeEmail(input.normalizedEmail ?? input.email);
-  const entryId = buildEntryDocumentId(input.eventId, normalizedEmail);
-  const entryRef = db.collection(collections.entries).doc(entryId);
+  const entriesCollection = db.collection(collections.entries);
+  // 申込の ID は「大会ID__メールアドレス」。その ID に記録を残したキャンセル済みの申込が
+  // ある場合だけ、再申込を「…__2」「…__3」の ID に保存する。
+  const baseEntryId = buildEntryDocumentId(input.eventId, normalizedEmail);
   const eventTitle = typeof eventData.title === "string" ? eventData.title : "";
   const pricingNow = getCurrentEntryFee(mapPublicEvent(input.eventId, eventData), now);
   const contentKey = buildContentKey(input.entryType, athletes);
@@ -277,30 +294,64 @@ export async function createEntry(
   }));
 
   return db.runTransaction<CreateEntryResult>(async (transaction) => {
-    const existingSnapshot = await transaction.get(entryRef);
-    const existing = existingSnapshot.exists
-      ? (existingSnapshot.data() as DataRecord)
-      : null;
+    // 同じ大会・同じメールアドレスの申込（キャンセル済みを含む）をすべて読む。
+    const baseSnapshot = await transaction.get(entriesCollection.doc(baseEntryId));
+    const sameEmailSnapshot = await transaction.get(
+      entriesCollection
+        .where("eventId", "==", input.eventId)
+        .where("normalizedEmail", "==", normalizedEmail),
+    );
+    const sameEmailEntries = new Map<string, DataRecord>();
+    if (baseSnapshot.exists) {
+      sameEmailEntries.set(baseSnapshot.id, baseSnapshot.data() as DataRecord);
+    }
+    for (const snapshot of sameEmailSnapshot.docs) {
+      sameEmailEntries.set(snapshot.id, snapshot.data() as DataRecord);
+    }
 
-    // 支払済み、または銀行振込・現金払いで受付済み（未払い）の申込がある場合は重複。
-    if (
-      existing &&
-      (isPaidEntry(existing) ||
-        isAcceptedUnpaidEntry(existing) ||
-        hasAdminRecords(existing))
-    ) {
+    // 支払済み、銀行振込・現金払いで受付済み（未払い）、または管理者の記録がある
+    // 有効な申込がある場合は重複。キャンセル済みの申込は重複として扱わない。
+    const blocking = [...sameEmailEntries.values()].find(blocksReapplication);
+    if (blocking) {
       const duplicateError = buildDuplicateEmailFieldError(input.entryType);
       return failure(409, "duplicate_email_check", duplicateError.message, [
         {
           ...duplicateError,
-          code: isPaidEntry(existing)
+          code: isPaidEntry(blocking)
             ? "duplicate_email"
-            : hasAdminRecords(existing)
+            : hasAdminRecords(blocking)
               ? "duplicate_managed_entry"
               : "duplicate_unpaid_entry",
         },
       ]);
     }
+
+    // 上書きしてよい申込（カード決済の手続き途中など）があれば、従来どおり同じ申込として
+    // 保存し直す。なければ、空いている ID に新しく保存する（記録のある申込は残す）。
+    const overwritable = [...sameEmailEntries.entries()]
+      .filter(([, data]) => isOverwritableEntry(data))
+      .sort(([a], [b]) => Number(b === baseEntryId) - Number(a === baseEntryId));
+    let entryId = overwritable[0]?.[0] ?? baseEntryId;
+    if (!overwritable[0] && sameEmailEntries.has(baseEntryId)) {
+      let suffix = 2;
+      while (sameEmailEntries.has(`${baseEntryId}__${suffix}`)) {
+        suffix += 1;
+      }
+      entryId = `${baseEntryId}__${suffix}`;
+      // 同時に同じ ID へ保存されないよう、トランザクションの読み取りに含める。
+      const candidate = await transaction.get(entriesCollection.doc(entryId));
+      if (candidate.exists) {
+        return simpleFailure(
+          409,
+          "duplicate_email_check",
+          "email",
+          "duplicate_retry",
+          "申込の保存が重なりました。時間をおいて、もう一度お試しください。",
+        );
+      }
+    }
+    const entryRef = entriesCollection.doc(entryId);
+    const existing = sameEmailEntries.get(entryId) ?? null;
 
     // カード決済の手続きが終わっていない申込のやり直し。出場内容が同じなら、
     // 最初の申込時に確定した参加費を引き継ぐ（料金期間が変わっても再計算しない）。

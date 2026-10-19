@@ -23,6 +23,13 @@ import {
   readEntryAccounting,
   type EntryAccounting,
 } from "@/lib/entries/entry-accounting";
+import {
+  ENTRY_DELETE_BLOCK_MESSAGES,
+  ENTRY_DELETE_PERMISSION_MESSAGE,
+  getEntryDeleteBlockReason,
+  hasEntryWritePermission,
+  type EntryDeleteBlockReason,
+} from "@/lib/entries/entry-deletion";
 import { getGenderLabel } from "@/lib/entries/entry-divisions";
 import {
   DIVISION_CSV_HEADERS,
@@ -105,6 +112,8 @@ type AdminEntry = {
   checkedInAt: Date | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+  // 削除できない理由（支払済み・変更や入金の記録あり）。削除できる場合は null。
+  deleteBlockReason: EntryDeleteBlockReason | null;
 };
 
 const entryTypeLabels: Record<EntryType, string> = {
@@ -213,6 +222,7 @@ function mapEntrySnapshotToAdminEntries(
     checkedInAt: toDate(data.checkedInAt),
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
+    deleteBlockReason: getEntryDeleteBlockReason(data),
   };
 
   return mapEntryAthletes(data, toDate).map((athlete) => ({
@@ -464,6 +474,46 @@ async function sendBulkEmail(input: {
   return data;
 }
 
+// 削除できない申込・権限のない管理者には、押せない状態で理由を示す
+// （押しても削除が拒否され、一覧が元に戻るだけになるため）。
+function DeleteEntryButton({
+  entry,
+  canDelete,
+  isDeleting,
+  onDelete,
+  size = "normal",
+}: {
+  entry: AdminEntry;
+  canDelete: boolean;
+  isDeleting: boolean;
+  onDelete: (entry: AdminEntry) => void;
+  size?: "normal" | "small";
+}) {
+  const blockedMessage = !canDelete
+    ? ENTRY_DELETE_PERMISSION_MESSAGE
+    : entry.deleteBlockReason
+      ? ENTRY_DELETE_BLOCK_MESSAGES[entry.deleteBlockReason]
+      : null;
+  const sizeClassName = size === "small" ? "px-2 py-1.5 text-xs" : "px-3 py-2 text-sm";
+
+  return (
+    <button
+      type="button"
+      onClick={() => onDelete(entry)}
+      disabled={Boolean(blockedMessage) || isDeleting}
+      title={blockedMessage ?? undefined}
+      aria-label={
+        blockedMessage
+          ? `削除できません: ${blockedMessage}`
+          : `${entry.name}の申込を削除`
+      }
+      className={`rounded-md border border-red-800/70 ${sizeClassName} text-red-200 hover:border-red-500 hover:text-red-100 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-zinc-600 disabled:hover:border-white/10 disabled:hover:text-zinc-600`}
+    >
+      {isDeleting ? "削除中…" : blockedMessage ? "削除不可" : "削除"}
+    </button>
+  );
+}
+
 type AdminEntriesManagerProps = {
   eyebrow?: string;
   title?: string;
@@ -480,9 +530,16 @@ export function AdminEntriesManager({
   const canRecordPayment =
     adminUser?.role === "owner" ||
     (adminUser?.permissions ?? []).includes("payments:write");
+  // 申込の削除は entries:write の権限を持つ管理者だけが行える（owner は常に可）。
+  const canDeleteEntries = hasEntryWritePermission(adminUser);
   const [entries, setEntries] = useState<AdminEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // 一覧の取得エラー。一覧の更新を受け取ったら消す。
+  const [listError, setListError] = useState<string | null>(null);
+  // 操作（更新・削除・入金記録）のエラー。一覧の更新では消さない
+  // （削除が拒否されると、一覧は「消える → 戻る」と更新されるため）。
   const [error, setError] = useState<string | null>(null);
+  const [deletingEntryIds, setDeletingEntryIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] =
@@ -528,11 +585,11 @@ export function AdminEntriesManager({
 
         setEntries(nextEntries);
         setIsLoading(false);
-        setError(null);
+        setListError(null);
       },
       (caughtError) => {
         console.error(caughtError);
-        setError("エントリー一覧の取得に失敗しました。");
+        setListError("エントリー一覧の取得に失敗しました。");
         setIsLoading(false);
       },
     );
@@ -846,9 +903,28 @@ export function AdminEntriesManager({
     });
   }
 
+  // 申込（代表者申込の場合は全選手を含む申込全体）を削除する。
+  // 削除できるのは、支払済みでなく、変更・キャンセル・入金や返金の記録がない申込だけ
+  // （firestore.rules と同じ判定。記録がある申込はキャンセルで状態を残す）。
   async function deleteEntry(entry: AdminEntry) {
+    if (deletingEntryIds.includes(entry.entryId)) {
+      return;
+    }
+
+    if (!canDeleteEntries) {
+      setToast(null);
+      setError(ENTRY_DELETE_PERMISSION_MESSAGE);
+      return;
+    }
+
+    if (entry.deleteBlockReason) {
+      setToast(null);
+      setError(ENTRY_DELETE_BLOCK_MESSAGES[entry.deleteBlockReason]);
+      return;
+    }
+
     const confirmed = window.confirm(
-      `「${entry.name}」のエントリーを削除しますか？同じメールアドレスで再エントリー可能になります。`,
+      `「${entry.name}」の申込を削除しますか？削除すると元に戻せません。同じメールアドレスで再申込できるようになります。`,
     );
 
     if (!confirmed) {
@@ -856,14 +932,28 @@ export function AdminEntriesManager({
     }
 
     setError(null);
+    setToast(null);
+    setDeletingEntryIds((currentIds) => [...currentIds, entry.entryId]);
 
     try {
+      // サーバーが削除を確定してから完了になる（拒否された場合は例外になり、一覧は元に戻る）。
       await deleteDoc(doc(db, collections.entries, entry.entryId));
-      setToast("エントリーを削除しました。");
+      setToast(`「${entry.name}」の申込を削除しました。`);
     } catch (caughtError) {
       console.error(caughtError);
+      const code =
+        caughtError && typeof caughtError === "object" && "code" in caughtError
+          ? String(caughtError.code)
+          : "";
+
       setError(
-        "エントリーを削除できませんでした。支払済みの申込や、変更履歴・入金や返金の記録がある申込は削除できません。「詳細・変更」から申込全体をキャンセルしてください。",
+        code === "permission-denied"
+          ? `「${entry.name}」の申込を削除できませんでした。支払済み、または変更・キャンセル・入金や返金の記録がある申込は削除できません（削除する権限がない場合も同じです）。画面を再読み込みして、申込の状態を確認してください。`
+          : `「${entry.name}」の申込を削除できませんでした。通信状態を確認して、もう一度お試しください。${code ? `（${code}）` : ""}`,
+      );
+    } finally {
+      setDeletingEntryIds((currentIds) =>
+        currentIds.filter((entryId) => entryId !== entry.entryId),
       );
     }
   }
@@ -1096,16 +1186,38 @@ export function AdminEntriesManager({
         </button>
       </div>
 
-      {error ? (
+      {listError ? (
         <div className="rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100">
-          {error}
+          {listError}
         </div>
       ) : null}
-      {toast ? (
-        <div className="rounded-md border border-emerald-700 bg-emerald-950 px-4 py-3 text-sm text-emerald-100">
-          {toast}
-        </div>
-      ) : null}
+
+      {/* 操作の結果は一覧のどこで操作しても見えるよう、画面下に固定して表示する。 */}
+      <div
+        className="pointer-events-none fixed inset-x-4 bottom-4 z-40 flex flex-col items-end gap-2"
+        aria-live="polite"
+      >
+        {error ? (
+          <div
+            role="alert"
+            className="pointer-events-auto flex w-full max-w-xl items-start gap-3 rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100 shadow-lg"
+          >
+            <p className="flex-1 leading-6">{error}</p>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="shrink-0 rounded px-2 py-1 text-xs text-red-200 hover:bg-red-900"
+            >
+              閉じる
+            </button>
+          </div>
+        ) : null}
+        {toast ? (
+          <div className="pointer-events-auto w-full max-w-xl rounded-md border border-emerald-700 bg-emerald-950 px-4 py-3 text-sm text-emerald-100 shadow-lg">
+            {toast}
+          </div>
+        ) : null}
+      </div>
 
       <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
         <div className="grid gap-3 lg:grid-cols-[1fr_140px_170px_130px_130px_130px]">
@@ -1528,13 +1640,12 @@ export function AdminEntriesManager({
                         >
                           メール
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => void deleteEntry(entry)}
-                          className="rounded-md border border-red-800/70 px-3 py-2 text-sm text-red-200 hover:border-red-500 hover:text-red-100"
-                        >
-                          削除
-                        </button>
+                        <DeleteEntryButton
+                          entry={entry}
+                          canDelete={canDeleteEntries}
+                          isDeleting={deletingEntryIds.includes(entry.entryId)}
+                          onDelete={(target) => void deleteEntry(target)}
+                        />
                       </div>
                     </article>
                   ))}
@@ -1624,13 +1735,13 @@ export function AdminEntriesManager({
                               >
                                 メール
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => void deleteEntry(entry)}
-                                className="rounded-md border border-red-800/70 px-2 py-1.5 text-xs text-red-200 hover:border-red-500 hover:text-red-100"
-                              >
-                                削除
-                              </button>
+                              <DeleteEntryButton
+                                entry={entry}
+                                canDelete={canDeleteEntries}
+                                isDeleting={deletingEntryIds.includes(entry.entryId)}
+                                onDelete={(target) => void deleteEntry(target)}
+                                size="small"
+                              />
                             </div>
                           </td>
                         </tr>
@@ -1716,13 +1827,12 @@ export function AdminEntriesManager({
                   >
                     メール
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void deleteEntry(entry)}
-                    className="rounded-md border border-red-800/70 px-3 py-2 text-sm text-red-200 hover:border-red-500 hover:text-red-100"
-                  >
-                    削除
-                  </button>
+                  <DeleteEntryButton
+                    entry={entry}
+                    canDelete={canDeleteEntries}
+                    isDeleting={deletingEntryIds.includes(entry.entryId)}
+                    onDelete={(target) => void deleteEntry(target)}
+                  />
                 </div>
               </article>
             ))}
@@ -1827,13 +1937,13 @@ export function AdminEntriesManager({
                           >
                             メール
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => void deleteEntry(entry)}
-                            className="rounded-md border border-red-800/70 px-2 py-1.5 text-xs text-red-200 hover:border-red-500 hover:text-red-100"
-                          >
-                            削除
-                          </button>
+                          <DeleteEntryButton
+                            entry={entry}
+                            canDelete={canDeleteEntries}
+                            isDeleting={deletingEntryIds.includes(entry.entryId)}
+                            onDelete={(target) => void deleteEntry(target)}
+                            size="small"
+                          />
                         </div>
                       </td>
                     </tr>
