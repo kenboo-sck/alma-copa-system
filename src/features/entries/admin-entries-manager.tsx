@@ -565,6 +565,15 @@ function TestEntryActionDialog({
                       {result.deleted
                         ? ` … 変更履歴 ${result.deleted.history}件・会計記録 ${result.deleted.ledger}件・メール履歴 ${result.deleted.emailLogs}件も削除`
                         : ""}
+                      {result.kept &&
+                      result.kept.history + result.kept.ledger + result.kept.emailLogs >
+                        0
+                        ? `（同じ申込IDを使っていた過去の別の申込の記録 ${
+                            result.kept.history +
+                            result.kept.ledger +
+                            result.kept.emailLogs
+                          }件は残しました）`
+                        : ""}
                     </li>
                   ))}
                 </ul>
@@ -619,7 +628,8 @@ function TestEntryActionDialog({
               <div className="space-y-2 rounded-md border border-amber-700 bg-amber-950/50 p-3 text-amber-100">
                 <p className="font-semibold">元に戻せません。</p>
                 <p>
-                  申込本体と、その変更履歴・会計記録・メール履歴を削除します。キャンセル済みや変更履歴のある申込も削除されます。
+                  申込本体と、その申込の作成以降に作られた変更履歴・会計記録・メール履歴を削除します。キャンセル済みや変更履歴のある申込も削除されます。
+                  同じメールアドレスで以前に申し込まれ、削除済みになった別の申込の記録は残します。
                   入金・返金・Stripe
                   の決済記録がある申込は、サーバーで確認して削除しません。
                 </p>

@@ -87,4 +87,6 @@ export type TestEntryOperationResult = {
   error?: string;
   // 完全削除で削除した関連記録の件数。
   deleted?: { history: number; ledger: number; emailLogs: number };
+  // 同じ申込 ID を使っていた過去の別の申込の記録として、削除せずに残した件数。
+  kept?: { history: number; ledger: number; emailLogs: number };
 };

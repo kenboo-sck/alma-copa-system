@@ -94,7 +94,8 @@ export async function setTestEntryFlags(
   return results;
 }
 
-// テスト申込の完全削除。申込本体と、その変更履歴・会計記録・メール履歴を削除する。
+// テスト申込の完全削除。申込本体と、その申込の作成以降に作られた変更履歴・会計記録・
+// メール履歴を削除する（同じ ID を使っていた過去の別の申込の記録は残す）。
 // 申込ごとに 1 つのトランザクションで「テスト指定・入金状況の再確認」と削除を行うため、
 // 確認後に入金が記録された申込を消すことはない。1 件の失敗は他の申込に影響しない。
 export async function purgeTestEntries(
@@ -143,11 +144,19 @@ export async function purgeTestEntries(
             };
           }
 
-          const refs = [
-            ...ledgerSnapshot.docs,
-            ...historySnapshot.docs,
-            ...emailLogSnapshot.docs,
-          ].map((doc) => doc.ref);
+          // 申込 ID は「大会ID__メールアドレス」のため、削除済みの別の申込と同じ ID が再利用される
+          // ことがある。この申込の作成以降に作られた記録だけを削除し、それより前の記録
+          // （過去の別の申込のメール履歴など）は残す。作成時刻は Firestore が記録する値を使う。
+          const since = snapshot.createTime;
+          const isCreatedSince = (doc: { createTime: { valueOf(): string } }) =>
+            since !== undefined && doc.createTime.valueOf() >= since.valueOf();
+          const ownLedger = ledgerSnapshot.docs.filter(isCreatedSince);
+          const ownHistory = historySnapshot.docs.filter(isCreatedSince);
+          const ownEmailLogs = emailLogSnapshot.docs.filter(isCreatedSince);
+
+          const refs = [...ownLedger, ...ownHistory, ...ownEmailLogs].map(
+            (doc) => doc.ref,
+          );
           if (refs.length + 1 > MAX_WRITES_PER_ENTRY) {
             return {
               ...describe(entryId, data),
@@ -165,9 +174,14 @@ export async function purgeTestEntries(
             ...describe(entryId, data),
             ok: true,
             deleted: {
-              history: historySnapshot.size,
-              ledger: ledgerSnapshot.size,
-              emailLogs: emailLogSnapshot.size,
+              history: ownHistory.length,
+              ledger: ownLedger.length,
+              emailLogs: ownEmailLogs.length,
+            },
+            kept: {
+              history: historySnapshot.size - ownHistory.length,
+              ledger: ledgerSnapshot.size - ownLedger.length,
+              emailLogs: emailLogSnapshot.size - ownEmailLogs.length,
             },
           };
         },
