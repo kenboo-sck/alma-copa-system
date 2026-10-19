@@ -473,7 +473,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
             </h1>
             <p className="mt-4 max-w-xl text-sm font-semibold leading-7 text-zinc-200 sm:text-base">
               {entryTypeTitle}
-              。必要事項を入力し、確認ページで内容を見直してから決済へ進みます。
+              。必要事項を入力し、確認ページで内容とお支払い方法を確認してからお申し込みください。
             </p>
           </div>
         </div>
@@ -903,7 +903,7 @@ export function EntryCheckoutForm({ eventId, entryType }: EntryCheckoutFormProps
                     Entry Summary
                   </p>
                   <p className="mt-1 text-sm font-semibold text-zinc-400">
-                    料金内訳 / 確認ページで内容を見直してから決済します
+                    料金内訳 / お支払い方法は確認ページで選択します
                   </p>
                 </div>
                 <EntryFeeBreakdown
