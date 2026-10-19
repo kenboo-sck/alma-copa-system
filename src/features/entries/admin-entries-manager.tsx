@@ -51,6 +51,13 @@ import {
   type DivisionEntryRecord,
 } from "@/lib/entries/entry-records";
 import {
+  TEST_ENTRY_PURGE_BLOCK_MESSAGES,
+  getTestEntryPurgeBlockReason,
+  isTestEntry,
+  type TestEntryOperationResult,
+  type TestEntryPurgeBlockReason,
+} from "@/lib/entries/test-entries";
+import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
   formatPaymentDueDate,
@@ -67,6 +74,8 @@ type PaymentStatusFilter = "all" | PaymentStatus;
 type PaymentMethodFilter = "all" | PaymentMethod;
 type OverdueFilter = "all" | "overdue";
 type ParticipationFilter = "all" | "active" | "cancelled";
+type TestEntryFilter = "all" | "test" | "exclude";
+type TestEntryAction = "mark" | "unmark" | "purge";
 type ReceptionStatusFilter = "all" | ReceptionStatus;
 type ViewMode = "list" | "weightClass";
 
@@ -114,6 +123,11 @@ type AdminEntry = {
   updatedAt: Date | null;
   // 削除できない理由（支払済み・変更や入金の記録あり）。削除できる場合は null。
   deleteBlockReason: EntryDeleteBlockReason | null;
+  // オーナーが指定したテスト申込かどうか。
+  isTestEntry: boolean;
+  // テスト申込として完全削除できない理由（申込本体の項目から判定した目安。
+  // 会計記録を含めた最終的な判定はサーバーが削除の直前に行う）。
+  testPurgeBlockReason: TestEntryPurgeBlockReason | null;
 };
 
 const entryTypeLabels: Record<EntryType, string> = {
@@ -223,6 +237,8 @@ function mapEntrySnapshotToAdminEntries(
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
     deleteBlockReason: getEntryDeleteBlockReason(data),
+    isTestEntry: isTestEntry(data),
+    testPurgeBlockReason: getTestEntryPurgeBlockReason(data),
   };
 
   return mapEntryAthletes(data, toDate).map((athlete) => ({
@@ -474,6 +490,189 @@ async function sendBulkEmail(input: {
   return data;
 }
 
+function TestEntryBadge({ entry }: { entry: AdminEntry }) {
+  return entry.isTestEntry ? (
+    <span className="ml-2 inline-flex items-center rounded-sm border border-sky-500/70 bg-sky-950 px-2 py-0.5 align-middle text-xs font-bold text-sky-200">
+      テスト申込
+    </span>
+  ) : null;
+}
+
+const TEST_ENTRY_ACTION_LABELS: Record<TestEntryAction, string> = {
+  mark: "テスト申込に指定",
+  unmark: "テスト指定を解除",
+  purge: "テスト申込を完全削除",
+};
+
+// テスト申込の指定・解除・完全削除の確認と結果。
+// targets は申込単位（代表者申込の複数の選手は 1 件にまとめる）。
+function TestEntryActionDialog({
+  action,
+  targets,
+  results,
+  isRunning,
+  onConfirm,
+  onClose,
+}: {
+  action: TestEntryAction;
+  targets: AdminEntry[];
+  results: TestEntryOperationResult[] | null;
+  isRunning: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const isPurge = action === "purge";
+  const blocked = isPurge
+    ? targets.filter((entry) => entry.testPurgeBlockReason !== null)
+    : [];
+  const runnable = targets.filter((entry) => !blocked.includes(entry));
+  const succeeded = results?.filter((result) => result.ok) ?? [];
+  const failed = results?.filter((result) => !result.ok) ?? [];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="test-entry-dialog-title"
+    >
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-white/10 bg-zinc-950 p-6">
+        <p className="text-sm font-semibold text-alma-gold">
+          テスト申込の管理（オーナーのみ）
+        </p>
+        <h2 id="test-entry-dialog-title" className="mt-2 text-xl font-bold text-white">
+          {TEST_ENTRY_ACTION_LABELS[action]}
+        </h2>
+
+        {results ? (
+          <div className="mt-4 space-y-4 text-sm">
+            <p className="text-zinc-200">
+              成功{" "}
+              <span className="font-semibold text-emerald-300">
+                {succeeded.length}件
+              </span>
+              {" / "}
+              失敗 <span className="font-semibold text-red-300">{failed.length}件</span>
+            </p>
+            {succeeded.length > 0 ? (
+              <div>
+                <p className="font-semibold text-emerald-300">成功</p>
+                <ul className="mt-2 space-y-1 text-zinc-300">
+                  {succeeded.map((result) => (
+                    <li key={result.entryId}>
+                      {result.name || result.entryId}（
+                      {result.eventTitle || "大会未設定"}）
+                      {result.deleted
+                        ? ` … 変更履歴 ${result.deleted.history}件・会計記録 ${result.deleted.ledger}件・メール履歴 ${result.deleted.emailLogs}件も削除`
+                        : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {failed.length > 0 ? (
+              <div>
+                <p className="font-semibold text-red-300">失敗（変更していません）</p>
+                <ul className="mt-2 space-y-1 text-red-100">
+                  {failed.map((result) => (
+                    <li key={result.entryId}>
+                      {result.name || result.entryId}
+                      {result.eventTitle ? `（${result.eventTitle}）` : ""}：
+                      {result.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-4 space-y-4 text-sm">
+            <p className="text-zinc-200">
+              対象:{" "}
+              <span className="font-semibold text-white">{runnable.length}件</span>
+              {blocked.length > 0 ? `（ほか ${blocked.length}件は対象外）` : ""}
+            </p>
+            <ul className="max-h-60 space-y-1 overflow-y-auto rounded-md border border-white/10 p-3 text-zinc-300">
+              {runnable.map((entry) => (
+                <li key={entry.entryId}>
+                  {entry.name}（{entry.eventTitle}）
+                  {entry.status === "cancelled" ? " ・取消済み" : ""}
+                </li>
+              ))}
+            </ul>
+            {blocked.length > 0 ? (
+              <div className="rounded-md border border-red-800 bg-red-950/60 p-3 text-red-100">
+                <p className="font-semibold">完全削除できない申込（削除しません）</p>
+                <ul className="mt-2 space-y-1">
+                  {blocked.map((entry) => (
+                    <li key={entry.entryId}>
+                      {entry.name}（{entry.eventTitle}）：
+                      {entry.testPurgeBlockReason
+                        ? TEST_ENTRY_PURGE_BLOCK_MESSAGES[entry.testPurgeBlockReason]
+                        : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {isPurge ? (
+              <div className="space-y-2 rounded-md border border-amber-700 bg-amber-950/50 p-3 text-amber-100">
+                <p className="font-semibold">元に戻せません。</p>
+                <p>
+                  申込本体と、その変更履歴・会計記録・メール履歴を削除します。キャンセル済みや変更履歴のある申込も削除されます。
+                  入金・返金・Stripe
+                  の決済記録がある申込は、サーバーで確認して削除しません。
+                </p>
+                <p>
+                  すでに受信されたメール、メールサーバーや Stripe・Vercel
+                  など外部サービスに残る記録は削除できません。 削除時にメールの送信や
+                  Stripe での取消・返金は行いません。
+                </p>
+                <p>削除後は、同じメールアドレスで再申込できます。</p>
+              </div>
+            ) : (
+              <p className="text-zinc-400">
+                {action === "mark"
+                  ? "テスト申込に指定すると、一覧で「テスト申込」と表示され、オーナーが完全削除できるようになります。申込の内容・金額は変わりません。"
+                  : "テスト指定を解除すると、通常の申込と同じ扱い（通常の削除制限）に戻ります。"}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isRunning}
+            className="min-h-11 rounded-md border border-white/10 px-4 py-2 text-sm text-zinc-200 hover:border-alma-gold hover:text-alma-gold disabled:opacity-50"
+          >
+            {results ? "閉じる" : "キャンセル"}
+          </button>
+          {results ? null : (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={isRunning || runnable.length === 0}
+              className={`min-h-11 rounded-md px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${
+                isPurge
+                  ? "bg-red-700 text-white hover:bg-red-600"
+                  : "bg-alma-gold text-black hover:bg-[#d7b760]"
+              }`}
+            >
+              {isRunning
+                ? "処理中…"
+                : isPurge
+                  ? `${runnable.length}件を完全削除する`
+                  : `${runnable.length}件を${action === "mark" ? "指定" : "解除"}する`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 削除できない申込・権限のない管理者には、押せない状態で理由を示す
 // （押しても削除が拒否され、一覧が元に戻るだけになるため）。
 function DeleteEntryButton({
@@ -540,6 +739,15 @@ export function AdminEntriesManager({
   // （削除が拒否されると、一覧は「消える → 戻る」と更新されるため）。
   const [error, setError] = useState<string | null>(null);
   const [deletingEntryIds, setDeletingEntryIds] = useState<string[]>([]);
+  // テスト申込の指定・解除・完全削除はオーナーだけが行える（サーバーでも確認する）。
+  const isOwner = adminUser?.role === "owner";
+  const [testEntryFilter, setTestEntryFilter] = useState<TestEntryFilter>("all");
+  const [testEntryDialog, setTestEntryDialog] = useState<{
+    action: TestEntryAction;
+    targets: AdminEntry[];
+    results: TestEntryOperationResult[] | null;
+  } | null>(null);
+  const [isRunningTestAction, setIsRunningTestAction] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [paymentStatusFilter, setPaymentStatusFilter] =
@@ -681,13 +889,17 @@ export function AdminEntriesManager({
         receptionStatusFilter === "all" ||
         entry.receptionStatus === receptionStatusFilter;
       const matchesEvent = eventFilter === "all" || entry.eventId === eventFilter;
+      const matchesTestEntry =
+        testEntryFilter === "all" ||
+        (testEntryFilter === "test" ? entry.isTestEntry : !entry.isTestEntry);
 
       if (
         matchedDivisionEntries.length === 0 ||
         !matchesSearch ||
         !matchesPayment ||
         !matchesReception ||
-        !matchesEvent
+        !matchesEvent ||
+        !matchesTestEntry
       ) {
         return [];
       }
@@ -704,6 +916,7 @@ export function AdminEntriesManager({
     paymentStatusFilter,
     receptionStatusFilter,
     searchQuery,
+    testEntryFilter,
   ]);
 
   // 部門・階級ごとのグループ。両部門に出場する選手は、それぞれのグループに入る。
@@ -955,6 +1168,82 @@ export function AdminEntriesManager({
       setDeletingEntryIds((currentIds) =>
         currentIds.filter((entryId) => entryId !== entry.entryId),
       );
+    }
+  }
+
+  // 選択中の選手を申込単位にまとめる（代表者申込の複数の選手は 1 件）。
+  function getSelectedApplications(filter?: (entry: AdminEntry) => boolean) {
+    const byEntryId = new Map<string, AdminEntry>();
+    for (const entry of selectedEntries) {
+      if ((!filter || filter(entry)) && !byEntryId.has(entry.entryId)) {
+        byEntryId.set(entry.entryId, entry);
+      }
+    }
+    return [...byEntryId.values()];
+  }
+
+  function openTestEntryDialog(action: TestEntryAction) {
+    if (!isOwner) {
+      return;
+    }
+
+    const targets = getSelectedApplications(
+      action === "mark"
+        ? (entry) => !entry.isTestEntry
+        : action === "unmark"
+          ? (entry) => entry.isTestEntry
+          : undefined,
+    );
+    setTestEntryDialog({ action, targets, results: null });
+  }
+
+  async function runTestEntryAction() {
+    if (!testEntryDialog || isRunningTestAction) {
+      return;
+    }
+
+    const { action, targets } = testEntryDialog;
+    // 完全削除は、画面上で対象外と分かっている申込を送らない（サーバーでも再確認する）。
+    const entryIds = targets
+      .filter((entry) => action !== "purge" || entry.testPurgeBlockReason === null)
+      .map((entry) => entry.entryId);
+
+    setIsRunningTestAction(true);
+    setError(null);
+
+    try {
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error("管理者認証を確認できませんでした。");
+      }
+
+      const response = await fetch("/api/admin/entries/test-entries", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action, entryIds }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        results?: TestEntryOperationResult[];
+      } | null;
+
+      if (!response.ok || !data?.results) {
+        throw new Error(data?.error ?? "操作に失敗しました。");
+      }
+
+      // 削除した申込は一覧の更新で消え、選択も自動で外れる。
+      setTestEntryDialog({ action, targets, results: data.results });
+    } catch (caughtError) {
+      console.error(caughtError);
+      setTestEntryDialog(null);
+      setError(
+        caughtError instanceof Error ? caughtError.message : "操作に失敗しました。",
+      );
+    } finally {
+      setIsRunningTestAction(false);
     }
   }
 
@@ -1262,6 +1551,20 @@ export function AdminEntriesManager({
             </select>
           </label>
           <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">テスト申込</span>
+            <select
+              value={testEntryFilter}
+              onChange={(event) =>
+                setTestEntryFilter(event.target.value as TestEntryFilter)
+              }
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            >
+              <option value="all">すべて</option>
+              <option value="test">テスト申込のみ</option>
+              <option value="exclude">テスト申込を除く</option>
+            </select>
+          </label>
+          <label className="space-y-2">
             <span className="text-xs font-semibold text-zinc-400">振込期限</span>
             <select
               value={overdueFilter}
@@ -1494,6 +1797,37 @@ export function AdminEntriesManager({
             </button>
           </div>
         </div>
+        {isOwner ? (
+          <div className="mt-3 flex flex-col gap-2 border-t border-white/10 pt-3 sm:flex-row sm:items-center sm:justify-end">
+            <span className="text-xs text-zinc-500 sm:mr-auto">
+              テスト申込の管理（オーナーのみ）
+            </span>
+            <button
+              type="button"
+              onClick={() => openTestEntryDialog("mark")}
+              disabled={!selectedEntries.some((entry) => !entry.isTestEntry)}
+              className="min-h-10 rounded-md border border-sky-700 px-3 py-2 text-sm text-sky-200 hover:border-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              テスト申込に指定
+            </button>
+            <button
+              type="button"
+              onClick={() => openTestEntryDialog("unmark")}
+              disabled={!selectedEntries.some((entry) => entry.isTestEntry)}
+              className="min-h-10 rounded-md border border-white/10 px-3 py-2 text-sm text-zinc-200 hover:border-alma-gold disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              テスト指定を解除
+            </button>
+            <button
+              type="button"
+              onClick={() => openTestEntryDialog("purge")}
+              disabled={!selectedEntries.some((entry) => entry.isTestEntry)}
+              className="min-h-10 rounded-md border border-red-700 px-3 py-2 text-sm font-semibold text-red-200 hover:border-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              テスト申込を完全削除
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -1584,7 +1918,10 @@ export function AdminEntriesManager({
                             aria-label={`${entry.name}を選択`}
                           />
                           <div className="min-w-0">
-                            <h3 className="font-semibold text-white">{entry.name}</h3>
+                            <h3 className="font-semibold text-white">
+                              {entry.name}
+                              <TestEntryBadge entry={entry} />
+                            </h3>
                             <p className="mt-1 text-sm text-zinc-400">
                               {entry.eventTitle}
                             </p>
@@ -1682,7 +2019,10 @@ export function AdminEntriesManager({
                             />
                           </td>
                           <td className="px-4 py-4">
-                            <p className="font-semibold text-white">{entry.name}</p>
+                            <p className="font-semibold text-white">
+                              {entry.name}
+                              <TestEntryBadge entry={entry} />
+                            </p>
                             {entry.status === "cancelled" ? (
                               <StatusBadge label="取消済み" tone="danger" />
                             ) : null}
@@ -1771,7 +2111,10 @@ export function AdminEntriesManager({
                       aria-label={`${entry.name}を選択`}
                     />
                     <div className="min-w-0">
-                      <h2 className="font-semibold text-white">{entry.name}</h2>
+                      <h2 className="font-semibold text-white">
+                        {entry.name}
+                        <TestEntryBadge entry={entry} />
+                      </h2>
                       <p className="mt-1 text-sm text-zinc-400">{entry.eventTitle}</p>
                     </div>
                   </label>
@@ -1886,7 +2229,10 @@ export function AdminEntriesManager({
                         />
                       </td>
                       <td className="px-4 py-4">
-                        <p className="font-semibold text-white">{entry.name}</p>
+                        <p className="font-semibold text-white">
+                          {entry.name}
+                          <TestEntryBadge entry={entry} />
+                        </p>
                         {entry.status === "cancelled" ? (
                           <StatusBadge label="取消済み" tone="danger" />
                         ) : null}
@@ -2131,6 +2477,17 @@ export function AdminEntriesManager({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {testEntryDialog && isOwner ? (
+        <TestEntryActionDialog
+          action={testEntryDialog.action}
+          targets={testEntryDialog.targets}
+          results={testEntryDialog.results}
+          isRunning={isRunningTestAction}
+          onConfirm={() => void runTestEntryAction()}
+          onClose={() => setTestEntryDialog(null)}
+        />
       ) : null}
 
       {isBulkConfirmOpen ? (
