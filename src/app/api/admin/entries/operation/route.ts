@@ -79,6 +79,10 @@ const operationSchema = z.discriminatedUnion("type", [
     unitPrice: amount,
     basis: text(500),
   }),
+  z.object({
+    type: z.literal("switch_payment_method"),
+    method: z.enum(["cash", "bank_transfer"]),
+  }),
 ]);
 
 const requestSchema = z.discriminatedUnion("action", [

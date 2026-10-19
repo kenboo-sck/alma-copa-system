@@ -69,7 +69,8 @@ type OperationKind =
   | "complete_refund"
   | "no_refund"
   | "adjust_charge"
-  | "confirm_unit_price";
+  | "confirm_unit_price"
+  | "switch_payment_method";
 
 const KIND_LABELS: Record<OperationKind, string> = {
   add_division: "部門の追加",
@@ -86,6 +87,7 @@ const KIND_LABELS: Record<OperationKind, string> = {
   no_refund: "返金しない判断の記録",
   adjust_charge: "料金の調整",
   confirm_unit_price: "単価の確認",
+  switch_payment_method: "支払方法の切り替え",
 };
 
 type Dialog = {
@@ -389,6 +391,15 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
   const paymentState = getPaymentState(accounting);
   const paymentIssue = isRecord(entry.paymentIssue) ? entry.paymentIssue : null;
   const refundDecision = isRecord(entry.refundDecision) ? entry.refundDecision : null;
+  // カード決済の手続き待ちで、入金も Stripe の決済手続きもない申込だけ、現金・振込に切り替えられる
+  // （サーバーでも同じ条件と、大会で受け付けている支払方法かどうかを確認する）。
+  const canSwitchPaymentMethod =
+    entry.entryStatus === "pending_payment" &&
+    toPaymentMethod(entry.paymentMethod) === "card" &&
+    accounting.paidAmount === 0 &&
+    !["stripeSessionId", "stripeCheckoutSessionId", "stripePaymentIntentId"].some(
+      (key) => str(entry, key).trim() !== "",
+    );
 
   function openDialog(
     kind: OperationKind,
@@ -540,6 +551,12 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
           unitPrice: price,
           basis: values.basis ?? "",
         };
+      }
+      case "switch_payment_method": {
+        if (values.method !== "cash" && values.method !== "bank_transfer") {
+          return "切り替え後の支払方法を選択してください。";
+        }
+        return { type: "switch_payment_method", method: values.method };
       }
     }
   }
@@ -1032,6 +1049,27 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
             </p>
           </div>
         );
+      case "switch_payment_method":
+        return (
+          <div className="space-y-3">
+            <Field label="切り替え後の支払方法">
+              <select
+                value={target.values.method ?? ""}
+                onChange={(event) => setValue("method", event.target.value)}
+                className={inputClassName}
+              >
+                <option value="">選択してください</option>
+                <option value="cash">現金払い</option>
+                <option value="bank_transfer">銀行振込</option>
+              </select>
+            </Field>
+            <p className="text-xs leading-5 text-zinc-500">
+              「カード決済の手続き待ち」の申込を「受付済み・未払い」にします。請求額と支払状態は変わりません。
+              実際に受け取ったら「入金を記録」で記録してください。大会で受け付けていない支払方法には切り替えられません。
+              メールは自動では送信されません。
+            </p>
+          </div>
+        );
     }
   }
 
@@ -1227,6 +1265,17 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
             >
               単価を確認
             </button>
+            {canSwitchPaymentMethod ? (
+              <button
+                type="button"
+                className={buttonClassName}
+                onClick={() =>
+                  openDialog("switch_payment_method", {}, { method: "cash" })
+                }
+              >
+                支払方法を切り替え（現金・振込）
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

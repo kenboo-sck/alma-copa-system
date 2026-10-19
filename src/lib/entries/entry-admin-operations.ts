@@ -1,6 +1,6 @@
 import "server-only";
 
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 
 import {
   ENTRY_HISTORY_COLLECTION,
@@ -42,6 +42,15 @@ import {
 import { getAdminFirestore } from "@/lib/firebase/admin";
 import { collections } from "@/lib/firebase/collections";
 import { toDate } from "@/features/events/public-event-utils";
+import {
+  PAYMENT_METHOD_LABELS,
+  buildEntryPaymentInfo,
+  formatPaymentDueDate,
+  getAvailablePaymentMethods,
+  getEventPaymentSettings,
+  getPaymentDueAt,
+  toPaymentMethod,
+} from "@/lib/payments/payment-methods";
 
 // 管理者によるエントリーの追加・変更・キャンセルと、入金・返金・料金調整の記録。
 // すべて 1 回の操作 = 1 件の履歴として残し、金額が動く場合は台帳にも追記する。
@@ -93,7 +102,8 @@ export type EntryOperation =
   | { type: "complete_refund"; amount: number }
   | { type: "no_refund" }
   | { type: "adjust_charge"; amount: number }
-  | { type: "confirm_unit_price"; unitPrice: number; basis: string };
+  | { type: "confirm_unit_price"; unitPrice: number; basis: string }
+  | { type: "switch_payment_method"; method: "cash" | "bank_transfer" };
 
 // 金額の記録（入金・返金・料金調整・請求が変わる取消）は payments:write が必要。
 export const MONEY_OPERATION_TYPES: EntryOperation["type"][] = [
@@ -106,6 +116,7 @@ export const MONEY_OPERATION_TYPES: EntryOperation["type"][] = [
   "no_refund",
   "adjust_charge",
   "confirm_unit_price",
+  "switch_payment_method",
 ];
 
 export const OPERATION_LABELS: Record<EntryOperation["type"], string> = {
@@ -122,6 +133,7 @@ export const OPERATION_LABELS: Record<EntryOperation["type"], string> = {
   no_refund: "返金しない判断の記録",
   adjust_charge: "料金の調整",
   confirm_unit_price: "単価の確認",
+  switch_payment_method: "支払方法の切り替え",
 };
 
 export type OperationPreview = {
@@ -391,6 +403,7 @@ function planOperation(
   reason: string,
   accounting: EntryAccounting,
   eventDate: Date | null,
+  eventData: DataRecord | null,
 ): Plan {
   const athletes = cloneAthletes(data);
   const isRepresentative = data.entryType === "representative";
@@ -863,6 +876,95 @@ function planOperation(
       );
       break;
     }
+
+    // カード決済の手続きが終わっていない申込を、現金払い・銀行振込の「受付済み・未払い」に切り替える
+    // （例: 旧アプリでカード決済を選んだまま支払っていない申込）。支払状態・金額は変えず、
+    // 入金は「入金の記録」で別に記録する。メールの送信や Stripe での取消は行わない。
+    case "switch_payment_method": {
+      if (data.entryStatus !== "pending_payment") {
+        fail(
+          409,
+          "not_pending_payment",
+          "支払方法を切り替えられるのは「カード決済の手続き待ち」の申込だけです。",
+        );
+      }
+      if (toPaymentMethod(data.paymentMethod) !== "card") {
+        fail(409, "not_card_entry", "カード決済の申込ではありません。");
+      }
+      if (
+        data.paymentStatus === "paid" ||
+        accounting.paidAmount > 0 ||
+        accounting.refundPlannedAmount > 0 ||
+        accounting.refundedAmount > 0
+      ) {
+        fail(
+          409,
+          "payment_recorded",
+          "入金・返金の記録がある申込は、支払方法を切り替えられません。",
+        );
+      }
+      // 決済ページが残っていると、切り替え後にカードで支払われるおそれがあるため切り替えない。
+      if (
+        [
+          data.stripeSessionId,
+          data.stripeCheckoutSessionId,
+          data.stripePaymentIntentId,
+        ].some((value) => typeof value === "string" && value.trim() !== "")
+      ) {
+        fail(
+          409,
+          "stripe_session_exists",
+          "Stripe の決済手続きが作成済みのため、支払方法を切り替えられません。",
+        );
+      }
+
+      const settings = getEventPaymentSettings(eventData ?? {});
+      if (!getAvailablePaymentMethods(settings).includes(operation.method)) {
+        fail(
+          409,
+          "method_not_available",
+          `この大会では現在「${PAYMENT_METHOD_LABELS[operation.method]}」を受け付けていません。大会の支払設定を確認してください。`,
+        );
+      }
+
+      const paymentInfo = buildEntryPaymentInfo(settings, operation.method);
+      const paymentDueAt = getPaymentDueAt(paymentInfo.dueDate);
+      plan.before = {
+        paymentMethod: "card",
+        entryStatus: data.entryStatus,
+        paymentStatus: data.paymentStatus ?? null,
+      };
+      plan.after = {
+        paymentMethod: operation.method,
+        entryStatus: "confirmed",
+        paymentStatus: data.paymentStatus ?? null,
+      };
+      plan.entryUpdate = {
+        paymentMethod: operation.method,
+        paymentProvider: "manual",
+        entryStatus: "confirmed",
+        // 切り替え時点の大会の支払案内を、申込時と同じ形で保存する。
+        paymentInfo: {
+          bankAccountInfo: paymentInfo.bankAccountInfo,
+          note: paymentInfo.note,
+          dueDate: paymentInfo.dueDate,
+        },
+        paymentDueDate: paymentInfo.dueDate,
+        paymentDueAt: paymentDueAt ? Timestamp.fromDate(paymentDueAt) : null,
+      };
+      plan.summaryLines.push(
+        `支払方法を切り替え: クレジットカード → ${PAYMENT_METHOD_LABELS[operation.method]}`,
+        "申込状態: カード決済の手続き待ち → 受付済み",
+        `支払状態は未払いのまま（請求額 ${yen(accounting.billedAmount)}、入金は「入金の記録」で記録）`,
+        ...(paymentInfo.dueDate
+          ? [`お支払い期限: ${formatPaymentDueDate(paymentInfo.dueDate)}`]
+          : []),
+      );
+      plan.warnings.push(
+        "メールは自動では送信されません。お支払い方法の変更を参加者へ案内する場合は、通知メール欄から送信してください。",
+      );
+      break;
+    }
   }
 
   if (plan.accounting.overpaidAmount > 0 && operation.type !== "record_payment") {
@@ -1027,7 +1129,14 @@ export async function applyEntryOperation(input: {
         : null;
       const eventDate = toDate(eventSnapshot?.data()?.eventDate);
       const before = readEntryAccounting(data);
-      const plan = planOperation(data, input.operation, reason, before, eventDate);
+      const plan = planOperation(
+        data,
+        input.operation,
+        reason,
+        before,
+        eventDate,
+        (eventSnapshot?.data() as DataRecord | undefined) ?? null,
+      );
       const nextRevision = revision + 1;
       const preview: OperationPreview = {
         type: input.operation.type,

@@ -84,6 +84,10 @@ export function summarizeActiveEntry(data: DataRecord): ActiveEntrySummary {
     if (!isV2StoredAthlete(athlete)) {
       summary.athleteCount += 1;
       summary.divisionEntryCount += 1;
+      // 旧形式は部門の区別がなく、無差別級の出場を選手ごとに持つ（"yes" で出場）。
+      if (athlete.openClass === "yes") {
+        summary.openClassEntryCount += 1;
+      }
       continue;
     }
 
