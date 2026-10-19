@@ -83,6 +83,24 @@ const operationSchema = z.discriminatedUnion("type", [
     type: z.literal("switch_payment_method"),
     method: z.enum(["cash", "bank_transfer"]),
   }),
+  z.object({
+    type: z.literal("migrate_legacy_athlete"),
+    athleteIndex,
+    athleteClass: z.enum(["adult", "kids"]),
+    divisionSelection: z.enum(["gi", "nogi", "both"]),
+    gi: z.object({
+      ageCategory: text(40),
+      weightClass: text(40),
+      rank: text(20),
+      openClass: z.enum(["yes", "no", ""]),
+    }),
+    nogi: z.object({
+      ageCategory: text(40),
+      weightClass: text(40),
+      rank: text(20),
+      openClass: z.enum(["yes", "no", ""]),
+    }),
+  }),
 ]);
 
 const requestSchema = z.discriminatedUnion("action", [

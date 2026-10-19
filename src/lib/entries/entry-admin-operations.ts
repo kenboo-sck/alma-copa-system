@@ -28,8 +28,10 @@ import {
   describeDivisionEntry,
   getCategoryOptions,
   normalizeAthlete,
+  validateAthleteInput,
   type AthleteClass,
   type Division,
+  type DivisionSelection,
   type NormalizedAthlete,
 } from "@/lib/entries/entry-divisions";
 import {
@@ -103,7 +105,22 @@ export type EntryOperation =
   | { type: "no_refund" }
   | { type: "adjust_charge"; amount: number }
   | { type: "confirm_unit_price"; unitPrice: number; basis: string }
-  | { type: "switch_payment_method"; method: "cash" | "bank_transfer" };
+  | { type: "switch_payment_method"; method: "cash" | "bank_transfer" }
+  | {
+      // 旧形式（Gi / No-Gi の区別なし）の選手を、管理者が確認した内容で新形式へ移す。
+      type: "migrate_legacy_athlete";
+      athleteIndex: number;
+      athleteClass: AthleteClass;
+      divisionSelection: DivisionSelection;
+      // 出場しない部門は空欄。rank は Gi では帯色、No-Gi ではグレード。
+      gi: { ageCategory: string; weightClass: string; rank: string; openClass: string };
+      nogi: {
+        ageCategory: string;
+        weightClass: string;
+        rank: string;
+        openClass: string;
+      };
+    };
 
 // 金額の記録（入金・返金・料金調整・請求が変わる取消）は payments:write が必要。
 export const MONEY_OPERATION_TYPES: EntryOperation["type"][] = [
@@ -134,6 +151,7 @@ export const OPERATION_LABELS: Record<EntryOperation["type"], string> = {
   adjust_charge: "料金の調整",
   confirm_unit_price: "単価の確認",
   switch_payment_method: "支払方法の切り替え",
+  migrate_legacy_athlete: "旧形式から新形式への移行",
 };
 
 export type OperationPreview = {
@@ -965,6 +983,151 @@ function planOperation(
       );
       break;
     }
+
+    // 旧形式の選手を新形式へ移す。部門・帯（グレード）・年齢区分・階級・無差別級は管理者の指定だけを使い、
+    // 保存されていない情報は推測で補わない。請求額・入金記録は変えない（差がある場合は警告だけ出す）。
+    case "migrate_legacy_athlete": {
+      const athlete = getAthlete(athletes, operation.athleteIndex);
+      if (isV2StoredAthlete(athlete)) {
+        fail(409, "already_migrated", "この選手はすでに新形式です。");
+      }
+      if (isCancelledItem(athlete)) {
+        fail(409, "athlete_cancelled", "取消済みの選手は移行できません。");
+      }
+
+      // 氏名・性別・生年月日などは、保存済みの値だけを使う。
+      const name = typeof athlete.name === "string" ? athlete.name.trim() : "";
+      const birthDate = birthDateInput(athlete);
+      const missing = [
+        !name ? "氏名" : "",
+        athlete.gender !== "male" && athlete.gender !== "female" ? "性別" : "",
+        !birthDate ? "生年月日" : "",
+        operation.athleteClass === "kids" &&
+        !(typeof athlete.guardianName === "string" && athlete.guardianName.trim())
+          ? "保護者氏名"
+          : "",
+      ].filter(Boolean);
+      if (missing.length > 0) {
+        fail(
+          409,
+          "legacy_info_missing",
+          `${missing.join("・")}が保存されていないため移行できません（推測では補いません）。`,
+        );
+      }
+
+      const selection = operation.divisionSelection;
+      const uses = (division: Division) =>
+        selection === "both" || selection === division;
+      const input = {
+        name,
+        kana: typeof athlete.kana === "string" ? athlete.kana : "",
+        gender: athlete.gender as string,
+        birthDate,
+        athleteClass: operation.athleteClass,
+        guardianName:
+          typeof athlete.guardianName === "string" ? athlete.guardianName : "",
+        divisionSelection: selection,
+        gi: uses("gi")
+          ? {
+              ageCategory: operation.gi.ageCategory,
+              weightClass: operation.gi.weightClass,
+              belt: operation.gi.rank,
+              openClass: operation.gi.openClass,
+            }
+          : { ageCategory: "", weightClass: "", belt: "", openClass: "" },
+        nogi: uses("nogi")
+          ? {
+              ageCategory: operation.nogi.ageCategory,
+              weightClass: operation.nogi.weightClass,
+              grade: operation.nogi.rank,
+              openClass: operation.nogi.openClass,
+            }
+          : { ageCategory: "", weightClass: "", grade: "", openClass: "" },
+      };
+      const issues = validateAthleteInput(input);
+      if (issues.length > 0) {
+        fail(400, "invalid_migration", issues[0].message);
+      }
+      const normalized = normalizeAthlete(input);
+      if (!normalized) {
+        fail(400, "invalid_migration", "移行後の出場内容を確認してください。");
+      }
+      if (eventDate) {
+        const ageIssues = checkAthleteAge(normalized, eventDate);
+        if (ageIssues.length > 0) {
+          fail(400, "age_category_mismatch", ageIssues[0].message);
+        }
+      }
+
+      const legacyLine =
+        [athlete.category, athlete.ageCategory, athlete.weightClass]
+          .filter((value) => typeof value === "string" && value)
+          .join(" / ") || "カテゴリー情報なし";
+      const legacyOpenClass =
+        athlete.openClass === "yes"
+          ? "参加"
+          : athlete.openClass === "no"
+            ? "不参加"
+            : "記録なし";
+      const stored: DataRecord = {
+        ...normalized,
+        birthDate: new Date(normalized.birthDate),
+        status: "active",
+        migratedFromLegacyAt: new Date(),
+      };
+      athletes[operation.athleteIndex] = stored;
+      plan.athletes = athletes;
+      plan.before = {
+        format: "legacy",
+        category: athlete.category ?? null,
+        ageCategory: athlete.ageCategory ?? null,
+        weightClass: athlete.weightClass ?? null,
+        openClass: athlete.openClass ?? null,
+      };
+      plan.after = {
+        format: "v2",
+        athleteClass: normalized.athleteClass,
+        divisionSelection: normalized.divisionSelection,
+        gi: normalized.gi,
+        nogi: normalized.nogi,
+      };
+      plan.summaryLines.push(
+        `${who(stored, operation.athleteIndex)}を旧形式から新形式へ移行`,
+        `移行前: ${legacyLine} / 無差別級 ${legacyOpenClass}（旧形式）`,
+        ...describeAthleteEntries(normalized).map((line) => `移行後: ${line}`),
+        "請求額・入金記録は変更しません。",
+      );
+
+      // 移行後の内容で計算した金額と現在の請求額を比べ、違う場合は知らせる（請求額は変えない）。
+      const info = readUnitPrice(data);
+      if (info.isTrusted && info.unitPrice !== null) {
+        const unit = info.unitPrice;
+        const calculated = athletes
+          .filter((item) => !isCancelledItem(item) && isV2StoredAthlete(item))
+          .reduce(
+            (sum, item) =>
+              sum +
+              getActiveDivisions(item).reduce(
+                (subtotal, division) => subtotal + divisionValue(item, division, unit),
+                0,
+              ),
+            0,
+          );
+        const hasLegacyLeft = athletes.some(
+          (item) => !isCancelledItem(item) && !isV2StoredAthlete(item),
+        );
+        if (!hasLegacyLeft && calculated !== accounting.billedAmount) {
+          plan.warnings.push(
+            `移行後の出場内容で計算した金額（${yen(calculated)}）と、現在の請求額（${yen(accounting.billedAmount)}）が異なります。請求額は変更しません。必要な場合は「料金を調整」で記録してください。`,
+          );
+        }
+      } else {
+        plan.warnings.push(
+          "単価が未確認のため、移行後の内容と請求額の比較はしていません。請求額は変更しません。",
+        );
+      }
+      break;
+    }
   }
 
   if (plan.accounting.overpaidAmount > 0 && operation.type !== "record_payment") {
@@ -1001,9 +1164,13 @@ function isManualAddition(type: EntryOperation["type"]) {
 // 出場内容の変更後に、申込本体の集計項目を更新する。
 function contentFields(data: DataRecord, athletes: DataRecord[], revision: number) {
   const isRepresentative = data.entryType === "representative";
+  // 旧形式の個人申込（選手情報がドキュメント直下）は選手を書き込まない。ただし新形式へ移行した
+  // 場合は、移行後の選手を athlete として保存する（直下の旧項目は要約として残る）。
+  const keepLegacyIndividual =
+    isLegacyIndividual(data) && !isV2StoredAthlete(athletes[0] ?? {});
   const nextData: DataRecord = isRepresentative
     ? { ...data, athletes }
-    : isLegacyIndividual(data)
+    : keepLegacyIndividual
       ? data
       : { ...data, athlete: athletes[0] };
   const summary = summarizeActiveEntry(nextData);
@@ -1014,7 +1181,7 @@ function contentFields(data: DataRecord, athletes: DataRecord[], revision: numbe
   return {
     ...(isRepresentative
       ? { athletes }
-      : isLegacyIndividual(data)
+      : keepLegacyIndividual
         ? {}
         : { athlete: athletes[0] }),
     athleteCount: summary.athleteCount,

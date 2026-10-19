@@ -70,7 +70,8 @@ type OperationKind =
   | "no_refund"
   | "adjust_charge"
   | "confirm_unit_price"
-  | "switch_payment_method";
+  | "switch_payment_method"
+  | "migrate_legacy_athlete";
 
 const KIND_LABELS: Record<OperationKind, string> = {
   add_division: "部門の追加",
@@ -88,6 +89,7 @@ const KIND_LABELS: Record<OperationKind, string> = {
   adjust_charge: "料金の調整",
   confirm_unit_price: "単価の確認",
   switch_payment_method: "支払方法の切り替え",
+  migrate_legacy_athlete: "旧形式から新形式への移行",
 };
 
 type Dialog = {
@@ -557,6 +559,49 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
           return "切り替え後の支払方法を選択してください。";
         }
         return { type: "switch_payment_method", method: values.method };
+      }
+      case "migrate_legacy_athlete": {
+        const athleteClass = values.athleteClass;
+        const selection = values.divisionSelection;
+        if (athleteClass !== "adult" && athleteClass !== "kids") {
+          return "大人／キッズを選択してください。";
+        }
+        if (selection !== "gi" && selection !== "nogi" && selection !== "both") {
+          return "出場部門を選択してください。";
+        }
+        const divisionInput = (prefix: "gi" | "nogi") => {
+          const used = selection === "both" || selection === prefix;
+          return {
+            ageCategory: used ? (values[`${prefix}AgeCategory`] ?? "") : "",
+            weightClass: used ? (values[`${prefix}WeightClass`] ?? "") : "",
+            rank: used ? (values[`${prefix}Rank`] ?? "") : "",
+            openClass:
+              used && athleteClass === "adult"
+                ? (values[`${prefix}OpenClass`] ?? "")
+                : "",
+          };
+        };
+        const gi = divisionInput("gi");
+        const nogi = divisionInput("nogi");
+        if (
+          athleteClass === "adult" &&
+          [gi, nogi].some(
+            (entry, i) =>
+              (selection === "both" || selection === (i === 0 ? "gi" : "nogi")) &&
+              entry.openClass !== "yes" &&
+              entry.openClass !== "no",
+          )
+        ) {
+          return "無差別級の参加有無を、出場する部門ごとに選択してください。";
+        }
+        return {
+          type: "migrate_legacy_athlete",
+          athleteIndex,
+          athleteClass,
+          divisionSelection: selection,
+          gi,
+          nogi,
+        };
       }
     }
   }
@@ -1070,6 +1115,84 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
             </p>
           </div>
         );
+      case "migrate_legacy_athlete": {
+        const values = target.values;
+        const migrateClass: AthleteClass =
+          values.athleteClass === "kids" ? "kids" : "adult";
+        const selection = values.divisionSelection ?? "";
+        const explicitSelect = (
+          key: string,
+          label: string,
+          choices: Array<[string, string]>,
+        ) => (
+          <Field label={label}>
+            <select
+              value={values[key] ?? ""}
+              onChange={(event) => setValue(key, event.target.value)}
+              className={inputClassName}
+            >
+              <option value="">選択してください</option>
+              {choices.map(([value, text]) => (
+                <option key={value} value={value}>
+                  {text}
+                </option>
+              ))}
+            </select>
+          </Field>
+        );
+        const divisionBlock = (division: Division) =>
+          selection === "both" || selection === division ? (
+            <div className="space-y-3 rounded-md border border-white/10 p-3">
+              <p className="text-sm font-semibold text-white">
+                {DIVISION_LABELS[division]}
+              </p>
+              {categoryFields(migrateClass, division, division)}
+              {migrateClass === "adult"
+                ? explicitSelect(`${division}OpenClass`, "無差別級の参加", [
+                    ["yes", `参加（+${yen(OPEN_CLASS_FEE)}）`],
+                    ["no", "不参加"],
+                  ])
+                : null}
+            </div>
+          ) : null;
+
+        return (
+          <div className="space-y-3">
+            <div className="rounded-md border border-white/10 bg-black/40 p-3 text-sm leading-6 text-zinc-300">
+              <p className="text-xs font-semibold text-zinc-400">
+                保存されている旧形式の内容
+              </p>
+              <p>
+                {[athlete?.category, athlete?.ageCategory, athlete?.weightClass]
+                  .filter((value) => typeof value === "string" && value)
+                  .join(" / ") || "カテゴリー情報なし"}
+                {" / 無差別級: "}
+                {athlete?.openClass === "yes"
+                  ? "参加"
+                  : athlete?.openClass === "no"
+                    ? "不参加"
+                    : "記録なし"}
+              </p>
+            </div>
+            {explicitSelect("athleteClass", "区分", [
+              ["adult", "大人"],
+              ["kids", "キッズ"],
+            ])}
+            {explicitSelect("divisionSelection", "出場部門", [
+              ["gi", "Giのみ"],
+              ["nogi", "No-Giのみ"],
+              ["both", "両方（Gi・No-Gi）"],
+            ])}
+            {divisionBlock("gi")}
+            {divisionBlock("nogi")}
+            <p className="text-xs leading-5 text-zinc-500">
+              部門・帯（グレード）・年齢区分・階級・無差別級は、申込者への確認などで分かった内容を指定してください。
+              保存されていない情報は推測で補いません（氏名・性別・生年月日は保存済みの値を使います）。
+              移行だけでは請求額・入金記録は変わりません。次の画面で移行前後を比較してから確定します。
+            </p>
+          </div>
+        );
+      }
     }
   }
 
@@ -1512,7 +1635,19 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
                       旧形式（Gi / No-Gi
                       の区別なし）のため、部門・カテゴリーの変更はできません。
                       取消・入金・返金・料金調整は記録できます。
+                      部門・カテゴリーを変更する場合は、先に新形式へ移行してください。
                     </span>
+                    {canEdit && !athleteCancelled ? (
+                      <button
+                        type="button"
+                        className={`${buttonClassName} mt-2`}
+                        onClick={() =>
+                          openDialog("migrate_legacy_athlete", { athleteIndex: index })
+                        }
+                      >
+                        新形式に移行（部門・カテゴリーを指定）
+                      </button>
+                    ) : null}
                   </p>
                 )}
               </article>
