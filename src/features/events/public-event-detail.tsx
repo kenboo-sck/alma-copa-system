@@ -4,6 +4,7 @@ import Link from "next/link";
 import { doc, onSnapshot } from "firebase/firestore";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { OPEN_CLASS_FEE } from "@/lib/entries/entry-divisions";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 
@@ -384,6 +385,20 @@ export function PublicEventDetail({ eventId }: PublicEventDetailProps) {
                   );
                 })}
               </div>
+              {/* 金額の数え方は申込フォーム・サーバーの料金計算（calculateEntryFees）と同じ。 */}
+              <ul className="mt-5 space-y-1.5 rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-zinc-300">
+                <li>
+                  表示の金額は、1部門（Gi または
+                  No-Gi）あたりの参加費です。両方に出場する場合は 2部門分になります。
+                </li>
+                <li>
+                  無差別級に参加する場合は、1部門につき{" "}
+                  <span className="font-bold text-alma-gold">
+                    +{formatPrice(OPEN_CLASS_FEE)}
+                  </span>{" "}
+                  が加算されます（大人のみ）。
+                </li>
+              </ul>
             </div>
 
             {event.aboutSection.enabled ? (

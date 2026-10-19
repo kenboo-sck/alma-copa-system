@@ -57,6 +57,7 @@ import {
   type TestEntryOperationResult,
   type TestEntryPurgeBlockReason,
 } from "@/lib/entries/test-entries";
+import { needsEntryEmailAttention } from "@/lib/entries/entry-email-status";
 import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_LABELS,
@@ -75,6 +76,7 @@ type PaymentMethodFilter = "all" | PaymentMethod;
 type OverdueFilter = "all" | "overdue";
 type ParticipationFilter = "all" | "active" | "cancelled";
 type TestEntryFilter = "all" | "test" | "exclude";
+type EmailAttentionFilter = "all" | "attention";
 type TestEntryAction = "mark" | "unmark" | "purge";
 type ReceptionStatusFilter = "all" | ReceptionStatus;
 type ViewMode = "list" | "weightClass";
@@ -125,6 +127,8 @@ type AdminEntry = {
   deleteBlockReason: EntryDeleteBlockReason | null;
   // オーナーが指定したテスト申込かどうか。
   isTestEntry: boolean;
+  // 受付済みなのに受付メールの送信に失敗している（送信が止まっている）申込。
+  needsEmailAttention: boolean;
   // テスト申込として完全削除できない理由（申込本体の項目から判定した目安。
   // 会計記録を含めた最終的な判定はサーバーが削除の直前に行う）。
   testPurgeBlockReason: TestEntryPurgeBlockReason | null;
@@ -238,6 +242,7 @@ function mapEntrySnapshotToAdminEntries(
     updatedAt: toDate(data.updatedAt),
     deleteBlockReason: getEntryDeleteBlockReason(data),
     isTestEntry: isTestEntry(data),
+    needsEmailAttention: needsEntryEmailAttention(data),
     testPurgeBlockReason: getTestEntryPurgeBlockReason(data),
   };
 
@@ -498,6 +503,14 @@ function TestEntryBadge({ entry }: { entry: AdminEntry }) {
   ) : null;
 }
 
+function EmailAttentionBadge({ entry }: { entry: AdminEntry }) {
+  return entry.needsEmailAttention ? (
+    <span className="ml-2 inline-flex items-center rounded-sm border border-red-500/70 bg-red-950 px-2 py-0.5 align-middle text-xs font-bold text-red-200">
+      受付メール未送信
+    </span>
+  ) : null;
+}
+
 const TEST_ENTRY_ACTION_LABELS: Record<TestEntryAction, string> = {
   mark: "テスト申込に指定",
   unmark: "テスト指定を解除",
@@ -752,6 +765,18 @@ export function AdminEntriesManager({
   // テスト申込の指定・解除・完全削除はオーナーだけが行える（サーバーでも確認する）。
   const isOwner = adminUser?.role === "owner";
   const [testEntryFilter, setTestEntryFilter] = useState<TestEntryFilter>("all");
+  const [emailAttentionFilter, setEmailAttentionFilter] =
+    useState<EmailAttentionFilter>("all");
+  // 受付メールが届いていない可能性がある申込（申込単位で数える）。
+  const emailAttentionCount = useMemo(
+    () =>
+      new Set(
+        entries
+          .filter((entry) => entry.needsEmailAttention)
+          .map((entry) => entry.entryId),
+      ).size,
+    [entries],
+  );
   const [testEntryDialog, setTestEntryDialog] = useState<{
     action: TestEntryAction;
     targets: AdminEntry[];
@@ -909,7 +934,8 @@ export function AdminEntriesManager({
         !matchesPayment ||
         !matchesReception ||
         !matchesEvent ||
-        !matchesTestEntry
+        !matchesTestEntry ||
+        (emailAttentionFilter === "attention" && !entry.needsEmailAttention)
       ) {
         return [];
       }
@@ -927,6 +953,7 @@ export function AdminEntriesManager({
     receptionStatusFilter,
     searchQuery,
     testEntryFilter,
+    emailAttentionFilter,
   ]);
 
   // 部門・階級ごとのグループ。両部門に出場する選手は、それぞれのグループに入る。
@@ -1485,6 +1512,21 @@ export function AdminEntriesManager({
         </button>
       </div>
 
+      {emailAttentionCount > 0 ? (
+        <div className="flex flex-col gap-2 rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            受付メールの送信に失敗した申込が {emailAttentionCount}
+            件あります。申込者に受付メールが届いていない可能性があります。詳細画面から再送できます。
+          </p>
+          <button
+            type="button"
+            onClick={() => setEmailAttentionFilter("attention")}
+            className="shrink-0 rounded-md border border-red-500 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-900"
+          >
+            該当の申込を表示
+          </button>
+        </div>
+      ) : null}
       {listError ? (
         <div className="rounded-md border border-red-700 bg-red-950 px-4 py-3 text-sm text-red-100">
           {listError}
@@ -1558,6 +1600,19 @@ export function AdminEntriesManager({
               <option value="all">すべて（取消済みを含む）</option>
               <option value="active">{RECORD_STATUS_LABELS.active}のみ</option>
               <option value="cancelled">{RECORD_STATUS_LABELS.cancelled}のみ</option>
+            </select>
+          </label>
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">受付メール</span>
+            <select
+              value={emailAttentionFilter}
+              onChange={(event) =>
+                setEmailAttentionFilter(event.target.value as EmailAttentionFilter)
+              }
+              className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
+            >
+              <option value="all">すべて</option>
+              <option value="attention">未送信（送信失敗）のみ</option>
             </select>
           </label>
           <label className="space-y-2">
@@ -1931,6 +1986,7 @@ export function AdminEntriesManager({
                             <h3 className="font-semibold text-white">
                               {entry.name}
                               <TestEntryBadge entry={entry} />
+                              <EmailAttentionBadge entry={entry} />
                             </h3>
                             <p className="mt-1 text-sm text-zinc-400">
                               {entry.eventTitle}
@@ -2032,6 +2088,7 @@ export function AdminEntriesManager({
                             <p className="font-semibold text-white">
                               {entry.name}
                               <TestEntryBadge entry={entry} />
+                              <EmailAttentionBadge entry={entry} />
                             </p>
                             {entry.status === "cancelled" ? (
                               <StatusBadge label="取消済み" tone="danger" />
@@ -2124,6 +2181,7 @@ export function AdminEntriesManager({
                       <h2 className="font-semibold text-white">
                         {entry.name}
                         <TestEntryBadge entry={entry} />
+                        <EmailAttentionBadge entry={entry} />
                       </h2>
                       <p className="mt-1 text-sm text-zinc-400">{entry.eventTitle}</p>
                     </div>
@@ -2242,6 +2300,7 @@ export function AdminEntriesManager({
                         <p className="font-semibold text-white">
                           {entry.name}
                           <TestEntryBadge entry={entry} />
+                          <EmailAttentionBadge entry={entry} />
                         </p>
                         {entry.status === "cancelled" ? (
                           <StatusBadge label="取消済み" tone="danger" />

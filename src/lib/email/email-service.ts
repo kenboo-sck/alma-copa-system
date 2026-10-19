@@ -642,6 +642,31 @@ export class EmailService {
     return results;
   }
 
+  // 組み立て済みの受付メール（getEntryEmailMessages の 1 通）を送る。管理画面からの再送で使う。
+  async sendEntryEmailMessage(message: EntryEmailMessage): Promise<EmailSendResult> {
+    const status = this.getEnvironmentStatus();
+
+    if (!status.isConfigured) {
+      throw new Error(
+        `Email service is not configured. Missing: ${status.missingKeys.join(", ")}`,
+      );
+    }
+
+    return status.provider === "php"
+      ? sendPhpEmail(
+          message.recipientEmail,
+          message.subject,
+          message.text,
+          message.html,
+        )
+      : sendSingleEmail(
+          message.recipientEmail,
+          message.subject,
+          message.text,
+          message.html,
+        );
+  }
+
   async sendManualEmail(input: {
     recipientEmail: string;
     subject: string;

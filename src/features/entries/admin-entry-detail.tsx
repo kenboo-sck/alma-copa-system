@@ -44,6 +44,10 @@ import {
   type AthleteClass,
   type Division,
 } from "@/lib/entries/entry-divisions";
+import {
+  ENTRY_EMAIL_STATE_LABELS,
+  getEntryEmailState,
+} from "@/lib/entries/entry-email-status";
 import { db } from "@/lib/firebase/client";
 import { collections } from "@/lib/firebase/collections";
 import {
@@ -265,6 +269,13 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
   const [mailBody, setMailBody] = useState("");
   const [mailMessage, setMailMessage] = useState<string | null>(null);
   const [isSendingMail, setIsSendingMail] = useState(false);
+  // 受付メールの再送。
+  const [resendIncludeAdmin, setResendIncludeAdmin] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
 
   // 出場内容の変更には entries:write、金額が動く操作には payments:write が必要（owner は常に可）。
   const permissions = adminUser?.permissions ?? [];
@@ -722,6 +733,79 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
   }
 
   // メールは、管理者が文面を確認して「送信」を押した場合だけ送る。
+  // 申込時と同じ文面の受付メールを再送する（既定は申込者向けだけ）。
+  async function resendEntryEmail() {
+    if (!entry || isResending) {
+      return;
+    }
+
+    const targets = resendIncludeAdmin
+      ? `${str(entry, "email")} と管理者通知`
+      : str(entry, "email");
+    if (!window.confirm(`${targets} 宛に、受付メールを再送します。よろしいですか？`)) {
+      return;
+    }
+
+    setIsResending(true);
+    setResendMessage(null);
+
+    try {
+      const token = await firebaseUser?.getIdToken();
+      if (!token) {
+        throw new Error("管理者認証を確認できませんでした。");
+      }
+
+      const response = await fetch("/api/admin/entries/resend-entry-email", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ entryId, includeAdmin: resendIncludeAdmin }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        results?: {
+          recipientType: "user" | "admin";
+          ok: boolean;
+          error: string | null;
+        }[];
+      } | null;
+
+      if (!response.ok || !data?.results) {
+        throw new Error(data?.error ?? "受付メールの再送に失敗しました。");
+      }
+
+      const label = (type: "user" | "admin") =>
+        type === "user" ? "申込者向け" : "管理者通知";
+      const failed = data.results.filter((result) => !result.ok);
+      setResendMessage(
+        failed.length === 0
+          ? {
+              tone: "success",
+              text: `受付メールを再送しました（${data.results.map((result) => label(result.recipientType)).join("・")}）。`,
+            }
+          : {
+              tone: "error",
+              text: `送信に失敗しました: ${failed
+                .map(
+                  (result) =>
+                    `${label(result.recipientType)}（${result.error ?? "原因不明"}）`,
+                )
+                .join("、")}。メール履歴も確認してください。`,
+            },
+      );
+    } catch (error) {
+      setResendMessage({
+        tone: "error",
+        text:
+          error instanceof Error ? error.message : "受付メールの再送に失敗しました。",
+      });
+    } finally {
+      setIsResending(false);
+    }
+  }
+
   async function sendMail() {
     if (!entry || isSendingMail || !mailSubject.trim() || !mailBody.trim()) {
       return;
@@ -1248,6 +1332,75 @@ export function AdminEntryDetail({ entryId }: { entryId: string }) {
             「入金の記録」で理由を付けて記録してください。
           </p>
         ) : null}
+        {(() => {
+          const emailState = getEntryEmailState(entry);
+          const entryEmail = isRecord(entry.entryEmail) ? entry.entryEmail : null;
+          const isProblem = emailState === "failed" || emailState === "stalled";
+          const canResend = canSendMail && entry.entryStatus === "confirmed";
+
+          return (
+            <div
+              className={`mt-3 rounded-md border px-4 py-3 text-sm leading-6 ${
+                isProblem
+                  ? "border-red-700/70 bg-red-950/60 text-red-100"
+                  : "border-white/10 bg-white/[0.03] text-zinc-300"
+              }`}
+            >
+              <p>
+                <span className="font-semibold">受付メール: </span>
+                {ENTRY_EMAIL_STATE_LABELS[emailState]}
+                {entryEmail && toDate(entryEmail.finishedAt)
+                  ? `（${formatDateTime(toDate(entryEmail.finishedAt))}）`
+                  : ""}
+                {entryEmail && str(entryEmail, "resentByEmail")
+                  ? ` / 管理画面から再送: ${str(entryEmail, "resentByEmail")}`
+                  : ""}
+              </p>
+              {isProblem ? (
+                <p>
+                  {emailState === "failed"
+                    ? `原因: ${str(entryEmail ?? {}, "error") || "不明"}。`
+                    : "送信の処理が途中で止まっています。"}
+                  申込者に受付メールが届いていない可能性があります。
+                </p>
+              ) : null}
+              {emailState === "unknown" ? (
+                <p className="text-xs text-zinc-500">
+                  旧アプリでの申込など、送信状況の記録がない申込です。送信状況はメール履歴で確認してください。
+                </p>
+              ) : null}
+              {canResend ? (
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void resendEntryEmail()}
+                    disabled={isResending}
+                    className={buttonClassName}
+                  >
+                    {isResending ? "送信中..." : "受付メールを再送"}
+                  </button>
+                  <label className="flex items-center gap-2 text-xs text-zinc-400">
+                    <input
+                      type="checkbox"
+                      checked={resendIncludeAdmin}
+                      onChange={(event) => setResendIncludeAdmin(event.target.checked)}
+                      className="h-4 w-4 accent-alma-gold"
+                    />
+                    管理者通知も送る
+                  </label>
+                </div>
+              ) : null}
+              {resendMessage ? (
+                <p
+                  role={resendMessage.tone === "error" ? "alert" : "status"}
+                  className={`mt-2 ${resendMessage.tone === "error" ? "text-red-200" : "text-emerald-200"}`}
+                >
+                  {resendMessage.text}
+                </p>
+              ) : null}
+            </div>
+          );
+        })()}
         {!canEdit ? (
           <p className="mt-3 text-sm text-zinc-400">
             このアカウントには変更の権限がないため、内容の確認のみ行えます。

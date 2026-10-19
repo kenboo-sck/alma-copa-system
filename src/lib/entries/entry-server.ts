@@ -11,7 +11,7 @@ import {
   toMailLogProvider,
 } from "@/lib/email/mail-logs";
 import type { EntryEmailPayload } from "@/lib/email/types";
-import { readEntryAccounting } from "@/lib/entries/entry-accounting";
+import { isRecord, readEntryAccounting } from "@/lib/entries/entry-accounting";
 import type { AthleteInputValues } from "@/lib/entries/entry-athlete-schema";
 import {
   ENTRY_FORMAT_VERSION,
@@ -680,6 +680,162 @@ export async function deliverEntryEmails(
     await finish("failed", errorMessage);
     return "failed";
   }
+}
+
+export type EntryEmailResendResult =
+  | {
+      ok: true;
+      results: {
+        recipientType: "user" | "admin";
+        recipientEmail: string;
+        ok: boolean;
+        error: string | null;
+      }[];
+    }
+  | { ok: false; status: number; message: string };
+
+// 管理画面からの受付メール（受付完了・完了メール）の再送。申込時と同じ文面を使う。
+// includeAdmin が false の場合は申込者向けだけを送る。送信結果は申込とメール履歴に記録する。
+export async function resendEntryEmails(input: {
+  entryId: string;
+  includeAdmin: boolean;
+  adminUid: string;
+  adminEmail: string;
+}): Promise<EntryEmailResendResult> {
+  const db = getAdminFirestore();
+  const entryRef = db.collection(collections.entries).doc(input.entryId);
+
+  // 送信を担当する権利を得る（同じ申込への同時の再送や、申込直後の送信と重ならないようにする）。
+  const claim = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(entryRef);
+    if (!snapshot.exists) {
+      return { ok: false as const, status: 404, message: "申込が見つかりません。" };
+    }
+    const data = snapshot.data() as DataRecord;
+    if (data.entryStatus !== "confirmed") {
+      return {
+        ok: false as const,
+        status: 409,
+        message:
+          data.entryStatus === "pending_payment"
+            ? "カード決済の手続きが終わっていない申込には、受付メールを送れません。"
+            : "受付済みの申込だけ、受付メールを再送できます。",
+      };
+    }
+    const entryEmail = isRecord(data.entryEmail) ? data.entryEmail : {};
+    const claimedAt = toDate(entryEmail.claimedAt);
+    if (
+      entryEmail.status === "sending" &&
+      claimedAt &&
+      Date.now() - claimedAt.getTime() <= EMAIL_CLAIM_TIMEOUT_MS
+    ) {
+      return {
+        ok: false as const,
+        status: 409,
+        message:
+          "受付メールを送信中です。少し時間をおいて、画面を再読み込みしてください。",
+      };
+    }
+    transaction.update(entryRef, {
+      entryEmail: { status: "sending", claimedAt: FieldValue.serverTimestamp() },
+    });
+    return { ok: true as const, data };
+  });
+
+  if (!claim.ok) {
+    return claim;
+  }
+
+  const payload = buildEntryEmailPayload(input.entryId, claim.data);
+  const status = emailService.getEnvironmentStatus();
+  const finish = (result: "sent" | "failed", error: string | null) =>
+    entryRef
+      .update({
+        entryEmail: {
+          status: result,
+          error,
+          finishedAt: FieldValue.serverTimestamp(),
+          resentAt: FieldValue.serverTimestamp(),
+          resentByEmail: input.adminEmail,
+        },
+      })
+      .catch((updateError: unknown) => {
+        console.error("Entry email resend status update failed", {
+          entryId: input.entryId,
+          updateError,
+        });
+      });
+
+  if (!payload || !status.isConfigured) {
+    const message = !payload
+      ? "メールに必要な情報が不足しています。"
+      : `メール送信の設定が不足しています: ${status.missingKeys.join(", ")}`;
+    await finish("failed", message);
+    return { ok: false, status: payload ? 503 : 409, message };
+  }
+
+  const messages = emailService
+    .getEntryEmailMessages(payload)
+    .filter((message) => input.includeAdmin || message.recipientType === "user");
+  const results: Extract<EntryEmailResendResult, { ok: true }>["results"] = [];
+
+  for (const message of messages) {
+    let error: string | null = null;
+    try {
+      await emailService.sendEntryEmailMessage(message);
+    } catch (caughtError) {
+      error = caughtError instanceof Error ? caughtError.message : String(caughtError);
+      console.error("Entry email resend failed", {
+        entryId: input.entryId,
+        recipientType: message.recipientType,
+        error,
+      });
+    }
+    results.push({
+      recipientType: message.recipientType,
+      recipientEmail: message.recipientEmail,
+      ok: error === null,
+      error,
+    });
+    await createServerMailLog({
+      entryId: input.entryId,
+      eventId: payload.eventId,
+      eventTitle: payload.eventTitle,
+      recipientEmail: message.recipientEmail,
+      recipientName: message.recipientName,
+      recipientType: message.recipientType,
+      mailType: "entry_completed",
+      subject: message.subject,
+      bodyPreview: buildBodyPreview(message.text),
+      status: error === null ? "sent" : "failed",
+      errorMessage: error,
+      provider: toMailLogProvider(status.provider),
+      createdByAdminUid: input.adminUid,
+      createdByAdminEmail: input.adminEmail,
+    }).catch((logError: unknown) => {
+      console.error("Entry email resend log write failed", {
+        entryId: input.entryId,
+        logError,
+      });
+    });
+  }
+
+  // 申込者向けが届いたかどうかで、申込の受付メールの状態を決める。
+  const userResult = results.find((result) => result.recipientType === "user");
+  await finish(
+    userResult?.ok ? "sent" : "failed",
+    userResult?.ok
+      ? null
+      : (userResult?.error ?? "申込者向けのメールを送れませんでした。"),
+  );
+  console.info("Entry email resend completed", {
+    entryId: input.entryId,
+    includeAdmin: input.includeAdmin,
+    sent: results.filter((result) => result.ok).length,
+    failed: results.filter((result) => !result.ok).length,
+  });
+
+  return { ok: true, results };
 }
 
 // ---------------------------------------------------------------------------
