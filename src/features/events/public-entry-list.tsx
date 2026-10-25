@@ -5,7 +5,11 @@ import {
   type PublicEntryList,
   type PublicEntryListCategory,
 } from "@/lib/entries/public-entry-list";
-import type { RecordDivision } from "@/lib/entries/entry-records";
+import {
+  ATHLETE_GENDER_LABELS,
+  ATHLETE_GENDERS,
+  type RecordDivision,
+} from "@/lib/entries/entry-records";
 
 type PublicEntryListViewProps = {
   entryList: PublicEntryList;
@@ -17,12 +21,25 @@ function CategoryCard({ category }: { category: PublicEntryListCategory }) {
   return (
     <article className="overflow-hidden rounded-xl border border-white/10 bg-[linear-gradient(145deg,rgba(255,255,255,0.05),rgba(255,255,255,0.015))]">
       <header className="flex items-start justify-between gap-3 border-b border-alma-gold/20 bg-alma-gold/[0.06] px-4 py-3 sm:px-5">
-        <h3 className="min-w-0 text-[0.95rem] font-bold leading-6 text-white sm:text-base">
+        <h4 className="min-w-0 text-[0.95rem] font-bold leading-6 text-white sm:text-base">
           <span className="mr-2 inline-flex rounded-sm bg-alma-gold px-1.5 py-0.5 align-[0.1em] text-[0.65rem] font-black uppercase tracking-[0.12em] text-black">
             {category.divisionLabel}
           </span>
-          {category.label}
-        </h3>
+          {/* 区切りの位置でだけ折り返し、スマートフォンでも各項目が途中で切れないようにする。 */}
+          {category.labelParts.map((part, index) => (
+            <span key={index}>
+              {index > 0 ? " " : null}
+              <span
+                className={
+                  index === 0 ? "whitespace-nowrap text-alma-gold" : "whitespace-nowrap"
+                }
+              >
+                {index > 0 ? <span className="mr-1 text-zinc-500">/</span> : null}
+                {part}
+              </span>
+            </span>
+          ))}
+        </h4>
         <span className="shrink-0 pt-0.5 text-xs font-semibold text-zinc-400">
           {category.athletes.length}名
         </span>
@@ -56,7 +73,17 @@ export function PublicEntryListView({ entryList }: PublicEntryListViewProps) {
     categories: entryList.categories.filter(
       (category) => category.division === division,
     ),
-  })).filter((section) => section.categories.length > 0);
+  }))
+    .filter((section) => section.categories.length > 0)
+    .map((section) => ({
+      ...section,
+      // 部門の中は、男性・女性・未設定ごとにまとめて表示する。
+      genderGroups: ATHLETE_GENDERS.map((gender) => ({
+        gender,
+        label: ATHLETE_GENDER_LABELS[gender],
+        categories: section.categories.filter((category) => category.gender === gender),
+      })).filter((group) => group.categories.length > 0),
+    }));
 
   return (
     <div className="bg-[#050505] text-white">
@@ -133,9 +160,23 @@ export function PublicEntryListView({ entryList }: PublicEntryListViewProps) {
                     <span className="h-6 w-1 bg-alma-gold" aria-hidden="true" />
                     {section.label}
                   </h2>
-                  <div className="mt-5 space-y-4">
-                    {section.categories.map((category) => (
-                      <CategoryCard key={category.key} category={category} />
+                  <div className="mt-6 space-y-8">
+                    {section.genderGroups.map((group) => (
+                      <section key={group.gender}>
+                        <h3 className="flex items-baseline justify-between gap-3 border-b border-alma-gold/30 pb-2">
+                          <span className="text-lg font-black text-alma-gold sm:text-xl">
+                            {section.label} {group.label}
+                          </span>
+                          <span className="shrink-0 text-xs font-semibold text-zinc-400">
+                            {group.categories.length}カテゴリー
+                          </span>
+                        </h3>
+                        <div className="mt-4 space-y-4">
+                          {group.categories.map((category) => (
+                            <CategoryCard key={category.key} category={category} />
+                          ))}
+                        </div>
+                      </section>
                     ))}
                   </div>
                 </section>

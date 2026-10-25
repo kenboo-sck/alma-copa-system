@@ -25,6 +25,8 @@ const ENTRY_FIELDS = [
   // 旧形式の個人申込は、選手情報（氏名・区分）が申込の直下にある。
   "name",
   "kana",
+  // 性別はカテゴリーの男女分けにだけ使い、値そのものは応答に含めない。
+  "gender",
   "category",
   "ageCategory",
   "weightClass",

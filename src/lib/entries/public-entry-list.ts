@@ -1,5 +1,5 @@
 // 一般公開用のエントリーリスト。
-// 公開するのは「エントリーカテゴリー」「所属」「名前」の 3 項目だけ。
+// 公開するのは「エントリーカテゴリー（性別を含む）」「所属」「名前」の 3 項目だけ。
 // 保存済みエントリーから、この 3 項目以外を含まない形に組み立てる。
 // メール・電話番号・生年月日・住所・支払情報・管理者メモなどはここで捨て、
 // 画面にも API の応答にも渡さない。
@@ -16,10 +16,14 @@ import {
   type AthleteClass,
 } from "./entry-divisions";
 import {
+  ATHLETE_GENDER_LABELS,
+  ATHLETE_GENDERS,
   getAgeCategoryLabel,
+  getAthleteGender,
   getRankLabel,
   getWeightClassLabel,
   mapEntryAthletes,
+  type AthleteGender,
   type DivisionEntryRecord,
   type RecordDivision,
 } from "./entry-records";
@@ -34,8 +38,13 @@ export type PublicEntryListCategory = {
   key: string;
   division: RecordDivision;
   divisionLabel: string;
-  // 例: 「大人 / アダルト / 白帯 / ライト」「大人 / アダルト / 白帯 / 無差別級」
+  // 選手ごとに保存された性別（male / female 以外は "unset"）。
+  gender: AthleteGender;
+  genderLabel: string;
+  // 例: 「男性 / 大人 / アダルト / 白帯 / ライト」「女性 / 大人 / アダルト / 白帯 / 無差別級」
   label: string;
+  // label を区切りごとに分けたもの（先頭は性別）。画面で区切りの位置で折り返すために使う。
+  labelParts: string[];
   athletes: PublicEntryListAthlete[];
 };
 
@@ -151,15 +160,19 @@ function publicRankLabel(entry: DivisionEntryRecord) {
 type CategoryDescriptor = {
   key: string;
   division: RecordDivision;
+  gender: AthleteGender;
   label: string;
+  labelParts: string[];
   sortKey: (number | string)[];
 };
 
+// 性別は申込者ではなく、選手ごとに保存された値で分ける（氏名などから推測しない）。
 function describeCategory(
   entry: DivisionEntryRecord,
+  gender: AthleteGender,
   isOpenClass: boolean,
 ): CategoryDescriptor {
-  const parts: string[] = [];
+  const parts: string[] = [ATHLETE_GENDER_LABELS[gender]];
 
   if (entry.athleteClass) {
     parts.push(ATHLETE_CLASS_LABELS[entry.athleteClass]);
@@ -175,9 +188,13 @@ function describeCategory(
   return {
     key: `${entry.division}|${label}`,
     division: entry.division,
+    gender,
     label,
+    labelParts: parts,
+    // 部門の中で男性 → 女性 → 未設定の順にまとめて並べるよう、性別は部門の次に比べる。
     sortKey: [
       DIVISION_ORDER.indexOf(entry.division),
+      ATHLETE_GENDERS.indexOf(gender),
       entry.athleteClass === "adult" ? 0 : entry.athleteClass === "kids" ? 1 : 2,
       ageCategoryOrder(entry.athleteClass, entry.ageCategory),
       ageLabel,
@@ -221,6 +238,7 @@ export type EntryListSource = {
 
 // 申込の一覧から、カテゴリー別の公開エントリーリストを組み立てる。
 // ・代表者申込は、代表者ではなく出場選手ごとに掲載する。
+// ・カテゴリーは性別ごとに分ける。性別は選手ごとに判定し、未保存の旧形式は「未設定」にする。
 // ・複数部門・無差別級に出場する選手は、該当する各カテゴリーに掲載する。
 // ・取消済みの申込・選手・部門は掲載しない。
 export function buildPublicEntryList(
@@ -243,6 +261,7 @@ export function buildPublicEntryList(
 
     for (const athlete of mapEntryAthletes(entry.data, toDate)) {
       const name = athlete.name.trim();
+      const gender = getAthleteGender(athlete.gender);
 
       if (athlete.status !== "active" || !name) {
         continue;
@@ -260,14 +279,14 @@ export function buildPublicEntryList(
           continue;
         }
 
-        const targets = [describeCategory(divisionEntry, false)];
+        const targets = [describeCategory(divisionEntry, gender, false)];
 
         // キッズには無差別級がない。
         if (
           divisionEntry.openClass === "yes" &&
           divisionEntry.athleteClass !== "kids"
         ) {
-          targets.push(describeCategory(divisionEntry, true));
+          targets.push(describeCategory(divisionEntry, gender, true));
         }
 
         for (const target of targets) {
@@ -293,7 +312,10 @@ export function buildPublicEntryList(
       key: category.key,
       division: category.division,
       divisionLabel: PUBLIC_DIVISION_LABELS[category.division],
+      gender: category.gender,
+      genderLabel: ATHLETE_GENDER_LABELS[category.gender],
       label: category.label,
+      labelParts: category.labelParts,
       // 公開する項目（名前・所属）だけを新しいオブジェクトに詰め直す。
       athletes: [...category.athletes]
         .sort(
