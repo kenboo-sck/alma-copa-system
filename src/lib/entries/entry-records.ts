@@ -5,7 +5,6 @@
 import {
   ATHLETE_CLASS_LABELS,
   DIVISION_LABELS,
-  getGenderLabel,
   getOpenClassLabel,
   getSelectedDivisions,
   isAthleteClass,
@@ -280,6 +279,30 @@ export function getAgeCategoryLabel(entry: DivisionEntryRecord) {
   return entry.ageCategory.trim() || UNSET_LABEL;
 }
 
+// 選手の性別（絞り込み・グループ分け用）。各選手に保存された値だけで判定し、氏名などから推測しない。
+// male / female 以外（未保存の旧形式、空欄、"other" など）は「未設定」として扱う。
+export const ATHLETE_GENDERS = ["male", "female", "unset"] as const;
+export type AthleteGender = (typeof ATHLETE_GENDERS)[number];
+
+export const ATHLETE_GENDER_LABELS: Record<AthleteGender, string> = {
+  male: "男性",
+  female: "女性",
+  unset: UNSET_LABEL,
+};
+
+export function getAthleteGender(gender: string): AthleteGender {
+  return gender === "male" || gender === "female" ? gender : "unset";
+}
+
+// 一覧・CSV の表示。male / female 以外の値が保存されている場合は、その値も併記する。
+export function getAthleteGenderLabel(gender: string) {
+  const key = getAthleteGender(gender);
+  const raw = gender.trim();
+  return key === "unset" && raw
+    ? `${UNSET_LABEL}（${raw}）`
+    : ATHLETE_GENDER_LABELS[key];
+}
+
 // 部門・階級別表示の見出し。例: 「Gi / ライト」
 export function getDivisionWeightGroupLabel(entry: DivisionEntryRecord) {
   return `${RECORD_DIVISION_LABELS[entry.division]} / ${getWeightClassLabel(entry)}`;
@@ -365,7 +388,7 @@ export function buildDivisionCsvCells(
   entry: DivisionEntryRecord,
 ) {
   return [
-    getGenderLabel(athlete.gender),
+    getAthleteGenderLabel(athlete.gender),
     athlete.guardianName,
     RECORD_DIVISION_LABELS[entry.division],
     entry.athleteClass ? ATHLETE_CLASS_LABELS[entry.athleteClass] : "",

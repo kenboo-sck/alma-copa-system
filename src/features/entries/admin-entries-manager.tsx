@@ -30,8 +30,9 @@ import {
   hasEntryWritePermission,
   type EntryDeleteBlockReason,
 } from "@/lib/entries/entry-deletion";
-import { getGenderLabel } from "@/lib/entries/entry-divisions";
 import {
+  ATHLETE_GENDERS,
+  ATHLETE_GENDER_LABELS,
   DIVISION_CSV_HEADERS,
   RECORD_DIVISION_LABELS,
   RECORD_STATUS_LABELS,
@@ -41,11 +42,14 @@ import {
   emptyDivisionEntryFilters,
   getAgeCategoryLabel,
   getAthleteClassLabel,
+  getAthleteGender,
+  getAthleteGenderLabel,
   getDivisionWeightGroupLabel,
   getRankLabel,
   getWeightClassLabel,
   mapEntryAthletes,
   matchesDivisionEntryFilters,
+  type AthleteGender,
   type AthleteRecord,
   type DivisionEntryFilters,
   type DivisionEntryRecord,
@@ -80,6 +84,7 @@ type EmailAttentionFilter = "all" | "attention";
 type TestEntryAction = "mark" | "unmark" | "purge";
 type ReceptionStatusFilter = "all" | ReceptionStatus;
 type ViewMode = "list" | "weightClass";
+type GenderFilter = "all" | AthleteGender;
 
 type AdminEntry = {
   id: string;
@@ -87,6 +92,8 @@ type AdminEntry = {
   eventId: string;
   eventTitle: string;
   entryType: EntryType;
+  // 申込者（代表者申込は代表者、個人申込は本人）の氏名。メールの宛名・申込全体の操作の表示に使う。
+  applicantName: string;
   name: string;
   kana: string;
   email: string;
@@ -216,6 +223,7 @@ function mapEntrySnapshotToAdminEntries(
     entryId,
     eventId: stringField(data, "eventId"),
     eventTitle: stringField(data, "eventTitle") || "大会未設定",
+    applicantName: stringField(data, "name"),
     entryType,
     email: stringField(data, "email"),
     phone: stringField(data, "phone"),
@@ -511,6 +519,61 @@ function EmailAttentionBadge({ entry }: { entry: AdminEntry }) {
   ) : null;
 }
 
+// 申込全体に作用する操作（メール・テスト申込・削除）の対象。代表者申込は、選択した選手が一部でも
+// 申込に含まれるすべての選手が対象になるため、選択外の選手も含めて表示する。
+type ApplicationAthlete = { id: string; name: string; isSelected: boolean };
+
+function getApplicationAthletes(
+  entry: AdminEntry,
+  entriesByEntryId: Map<string, AdminEntry[]>,
+  selectedIds: Set<string>,
+): ApplicationAthlete[] {
+  return (entriesByEntryId.get(entry.entryId) ?? [entry]).map((athlete) => ({
+    id: athlete.id,
+    name: athlete.name || "氏名未設定",
+    isSelected: selectedIds.has(athlete.id),
+  }));
+}
+
+function ApplicationScope({
+  entry,
+  athletes,
+}: {
+  entry: AdminEntry;
+  athletes: ApplicationAthlete[];
+}) {
+  if (entry.entryType !== "representative") {
+    return (
+      <span>
+        {entry.name}（個人申込・{entry.eventTitle}）
+      </span>
+    );
+  }
+
+  const unselectedCount = athletes.filter((athlete) => !athlete.isSelected).length;
+
+  return (
+    <span>
+      代表者申込「{entry.applicantName || "代表者未設定"}」（{entry.eventTitle}）
+      <span className="block text-xs text-zinc-400">
+        申込全体の選手 {athletes.length}名：
+        {athletes.map((athlete, index) => (
+          <span key={athlete.id}>
+            {index > 0 ? "、" : ""}
+            {athlete.name}
+            {athlete.isSelected ? "" : "（未選択）"}
+          </span>
+        ))}
+      </span>
+      {unselectedCount > 0 ? (
+        <span className="block text-xs text-amber-300">
+          未選択の選手 {unselectedCount}名も、申込全体として対象になります。
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 const TEST_ENTRY_ACTION_LABELS: Record<TestEntryAction, string> = {
   mark: "テスト申込に指定",
   unmark: "テスト指定を解除",
@@ -522,6 +585,7 @@ const TEST_ENTRY_ACTION_LABELS: Record<TestEntryAction, string> = {
 function TestEntryActionDialog({
   action,
   targets,
+  getAthletes,
   results,
   isRunning,
   onConfirm,
@@ -529,6 +593,7 @@ function TestEntryActionDialog({
 }: {
   action: TestEntryAction;
   targets: AdminEntry[];
+  getAthletes: (entry: AdminEntry) => ApplicationAthlete[];
   results: TestEntryOperationResult[] | null;
   isRunning: boolean;
   onConfirm: () => void;
@@ -610,14 +675,14 @@ function TestEntryActionDialog({
         ) : (
           <div className="mt-4 space-y-4 text-sm">
             <p className="text-zinc-200">
-              対象:{" "}
+              対象（申込単位）:{" "}
               <span className="font-semibold text-white">{runnable.length}件</span>
               {blocked.length > 0 ? `（ほか ${blocked.length}件は対象外）` : ""}
             </p>
             <ul className="max-h-60 space-y-1 overflow-y-auto rounded-md border border-white/10 p-3 text-zinc-300">
               {runnable.map((entry) => (
                 <li key={entry.entryId}>
-                  {entry.name}（{entry.eventTitle}）
+                  <ApplicationScope entry={entry} athletes={getAthletes(entry)} />
                   {entry.status === "cancelled" ? " ・取消済み" : ""}
                 </li>
               ))}
@@ -628,7 +693,7 @@ function TestEntryActionDialog({
                 <ul className="mt-2 space-y-1">
                   {blocked.map((entry) => (
                     <li key={entry.entryId}>
-                      {entry.name}（{entry.eventTitle}）：
+                      <ApplicationScope entry={entry} athletes={getAthletes(entry)} />：
                       {entry.testPurgeBlockReason
                         ? TEST_ENTRY_PURGE_BLOCK_MESSAGES[entry.testPurgeBlockReason]
                         : ""}
@@ -736,6 +801,32 @@ function DeleteEntryButton({
   );
 }
 
+function BulkMailRecipientList({
+  recipients,
+  getAthletes,
+}: {
+  recipients: { email: string; name: string; applications: AdminEntry[] }[];
+  getAthletes: (entry: AdminEntry) => ApplicationAthlete[];
+}) {
+  return (
+    <ul className="mt-4 max-h-48 space-y-2 overflow-y-auto rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-300">
+      {recipients.map((recipient) => (
+        <li key={recipient.email}>
+          <p className="flex flex-wrap justify-between gap-x-3">
+            <span className="font-semibold text-white">{recipient.name} 様</span>
+            <span className="break-all text-xs text-zinc-500">{recipient.email}</span>
+          </p>
+          {recipient.applications.map((entry) => (
+            <p key={entry.entryId} className="mt-0.5 text-xs text-zinc-400">
+              <ApplicationScope entry={entry} athletes={getAthletes(entry)} />
+            </p>
+          ))}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 type AdminEntriesManagerProps = {
   eyebrow?: string;
   title?: string;
@@ -800,6 +891,7 @@ export function AdminEntriesManager({
   );
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [eventFilter, setEventFilter] = useState("all");
+  const [genderFilter, setGenderFilter] = useState<GenderFilter>("all");
   const [qrEntry, setQrEntry] = useState<AdminEntry | null>(null);
   const [mailEntry, setMailEntry] = useState<AdminEntry | null>(null);
   const [mailSubject, setMailSubject] = useState("");
@@ -881,11 +973,18 @@ export function AdminEntriesManager({
     };
   }, [entries]);
 
+  // 絞り込み条件を変えたら、選択をすべて解除する。表示されていない選手が、気づかないまま
+  // 一括メール・テスト申込の操作の対象に残らないようにする（表示の切り替えでは解除しない）。
+  function changeFilter<Value>(setter: (value: Value) => void, value: Value) {
+    setter(value);
+    setSelectedEntryIds([]);
+  }
+
   function updateDivisionFilter<Key extends keyof DivisionEntryFilters>(
     key: Key,
     value: DivisionEntryFilters[Key],
   ) {
-    setDivisionFilters((current) => ({ ...current, [key]: value }));
+    changeFilter(setDivisionFilters, { ...divisionFilters, [key]: value });
   }
 
   const visibleEntries = useMemo(() => {
@@ -924,6 +1023,10 @@ export function AdminEntriesManager({
         receptionStatusFilter === "all" ||
         entry.receptionStatus === receptionStatusFilter;
       const matchesEvent = eventFilter === "all" || entry.eventId === eventFilter;
+      // 申込者ではなく、選手ごとに保存された性別で判定する
+      // （代表者申込で男女が混在する場合は、該当する選手の行だけが残る）。
+      const matchesGender =
+        genderFilter === "all" || getAthleteGender(entry.gender) === genderFilter;
       const matchesTestEntry =
         testEntryFilter === "all" ||
         (testEntryFilter === "test" ? entry.isTestEntry : !entry.isTestEntry);
@@ -934,6 +1037,7 @@ export function AdminEntriesManager({
         !matchesPayment ||
         !matchesReception ||
         !matchesEvent ||
+        !matchesGender ||
         !matchesTestEntry ||
         (emailAttentionFilter === "attention" && !entry.needsEmailAttention)
       ) {
@@ -946,6 +1050,7 @@ export function AdminEntriesManager({
     divisionFilters,
     entries,
     eventFilter,
+    genderFilter,
     overdueFilter,
     participationFilter,
     paymentMethodFilter,
@@ -956,35 +1061,97 @@ export function AdminEntriesManager({
     emailAttentionFilter,
   ]);
 
-  // 部門・階級ごとのグループ。両部門に出場する選手は、それぞれのグループに入る。
+  // 部門・階級・性別ごとのグループ。両部門に出場する選手は、それぞれのグループに入る。
+  // 同じ部門・階級の男性・女性・未設定が並ぶように、部門・階級の見出し → 性別の順に並べる。
   const visibleEntriesByWeightClass = useMemo(() => {
-    const map = new Map<string, AdminEntry[]>();
+    const map = new Map<
+      string,
+      {
+        divisionLabel: string;
+        gender: AthleteGender;
+        isCancelled: boolean;
+        entries: AdminEntry[];
+      }
+    >();
 
     for (const entry of visibleEntries) {
+      const gender = getAthleteGender(entry.gender);
+
       for (const divisionEntry of entry.divisionEntries) {
+        const divisionLabel = getDivisionWeightGroupLabel(divisionEntry);
         // 取消済みを表示する場合は、有効な出場と分けて集計する。
-        const groupLabel =
-          divisionEntry.status === "cancelled"
-            ? `${getDivisionWeightGroupLabel(divisionEntry)}（取消済み）`
-            : getDivisionWeightGroupLabel(divisionEntry);
-        const group = map.get(groupLabel) ?? [];
-        group.push({ ...entry, divisionEntries: [divisionEntry] });
-        map.set(groupLabel, group);
+        const isCancelled = divisionEntry.status === "cancelled";
+        const key = `${divisionLabel}|${gender}|${isCancelled}`;
+        const group = map.get(key) ?? {
+          divisionLabel,
+          gender,
+          isCancelled,
+          entries: [],
+        };
+        group.entries.push({ ...entry, divisionEntries: [divisionEntry] });
+        map.set(key, group);
       }
     }
 
-    return Array.from(map.entries())
-      .sort(([a], [b]) => a.localeCompare(b, "ja-JP"))
-      .map(([groupLabel, groupEntries]) => ({
-        groupLabel,
-        entries: [...groupEntries].sort(compareEntriesByName),
+    return Array.from(map.values())
+      .sort(
+        (a, b) =>
+          a.divisionLabel.localeCompare(b.divisionLabel, "ja-JP") ||
+          Number(a.isCancelled) - Number(b.isCancelled) ||
+          ATHLETE_GENDERS.indexOf(a.gender) - ATHLETE_GENDERS.indexOf(b.gender),
+      )
+      .map((group) => ({
+        groupLabel: `${group.divisionLabel} / ${ATHLETE_GENDER_LABELS[group.gender]}${
+          group.isCancelled ? "（取消済み）" : ""
+        }`,
+        entries: [...group.entries].sort(compareEntriesByName),
       }));
   }, [visibleEntries]);
+
+  // 申込（entryId）ごとの選手。代表者申込の申込全体に作用する操作の表示に使う。
+  const entriesByEntryId = useMemo(() => {
+    const map = new Map<string, AdminEntry[]>();
+    for (const entry of entries) {
+      map.set(entry.entryId, [...(map.get(entry.entryId) ?? []), entry]);
+    }
+    return map;
+  }, [entries]);
 
   const selectedEntries = useMemo(() => {
     const selectedIds = new Set(selectedEntryIds);
     return entries.filter((entry) => selectedIds.has(entry.id));
   }, [entries, selectedEntryIds]);
+
+  function getSelectionAthletes(entry: AdminEntry) {
+    return getApplicationAthletes(entry, entriesByEntryId, new Set(selectedEntryIds));
+  }
+
+  // 一括メールの実際の送信先。サーバーと同じく、申込ごとに 1 通（宛先は申込者のメールアドレス）、
+  // 同じメールアドレスの申込は 1 通にまとめる。代表者申込は選手ではなく代表者に届く。
+  const bulkMailRecipients = useMemo(() => {
+    const applications = new Map<string, AdminEntry>();
+    for (const entry of selectedEntries) {
+      if (!applications.has(entry.entryId)) {
+        applications.set(entry.entryId, entry);
+      }
+    }
+
+    const byEmail = new Map<string, AdminEntry[]>();
+    for (const entry of applications.values()) {
+      const email = entry.email.trim().toLowerCase();
+      byEmail.set(email, [...(byEmail.get(email) ?? []), entry]);
+    }
+
+    return Array.from(byEmail.values()).map((group) => ({
+      email: group[0].email,
+      name: group[0].applicantName || group[0].name,
+      applications: group,
+    }));
+  }, [selectedEntries]);
+  const bulkMailApplicationCount = bulkMailRecipients.reduce(
+    (count, recipient) => count + recipient.applications.length,
+    0,
+  );
 
   const visibleEntryIds = useMemo(
     () => visibleEntries.map((entry) => entry.id),
@@ -995,6 +1162,9 @@ export function AdminEntriesManager({
   ).length;
   const isAllVisibleSelected =
     visibleEntryIds.length > 0 && visibleSelectedCount === visibleEntryIds.length;
+  // 絞り込みを変えると選択は解除されるが、選択後に受付状態などが更新されて条件から外れた選手は
+  // 選択に残る（一括操作は選択中のすべてが対象）。その場合に、操作の前に分かるようにする。
+  const hiddenSelectedCount = selectedEntries.length - visibleSelectedCount;
 
   async function updateEntry(entryId: string, values: Record<string, unknown>) {
     setError(null);
@@ -1173,8 +1343,15 @@ export function AdminEntriesManager({
       return;
     }
 
+    // 削除は申込全体に作用する。代表者申込は、この行の選手だけでなく申込のすべての選手が消える。
+    const applicationAthletes = entriesByEntryId.get(entry.entryId) ?? [entry];
     const confirmed = window.confirm(
-      `「${entry.name}」の申込を削除しますか？削除すると元に戻せません。同じメールアドレスで再申込できるようになります。`,
+      entry.entryType === "representative"
+        ? `代表者申込「${entry.applicantName || "代表者未設定"}」の申込全体を削除しますか？\n\n` +
+            `この行の選手（${entry.name}）だけでなく、申込に含まれる選手 ${applicationAthletes.length}名すべてが削除されます：\n` +
+            `${applicationAthletes.map((athlete) => athlete.name || "氏名未設定").join("、")}\n\n` +
+            "削除すると元に戻せません。同じメールアドレスで再申込できるようになります。"
+        : `「${entry.name}」の申込を削除しますか？削除すると元に戻せません。同じメールアドレスで再申込できるようになります。`,
     );
 
     if (!confirmed) {
@@ -1520,7 +1697,7 @@ export function AdminEntriesManager({
           </p>
           <button
             type="button"
-            onClick={() => setEmailAttentionFilter("attention")}
+            onClick={() => changeFilter(setEmailAttentionFilter, "attention")}
             className="shrink-0 rounded-md border border-red-500 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-900"
           >
             該当の申込を表示
@@ -1566,7 +1743,7 @@ export function AdminEntriesManager({
             <span className="text-xs font-semibold text-zinc-400">検索</span>
             <input
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) => changeFilter(setSearchQuery, event.target.value)}
               placeholder="氏名、メール、QRのIDで検索"
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             />
@@ -1576,7 +1753,10 @@ export function AdminEntriesManager({
             <select
               value={paymentMethodFilter}
               onChange={(event) =>
-                setPaymentMethodFilter(event.target.value as PaymentMethodFilter)
+                changeFilter(
+                  setPaymentMethodFilter,
+                  event.target.value as PaymentMethodFilter,
+                )
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1593,7 +1773,10 @@ export function AdminEntriesManager({
             <select
               value={participationFilter}
               onChange={(event) =>
-                setParticipationFilter(event.target.value as ParticipationFilter)
+                changeFilter(
+                  setParticipationFilter,
+                  event.target.value as ParticipationFilter,
+                )
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1607,7 +1790,10 @@ export function AdminEntriesManager({
             <select
               value={emailAttentionFilter}
               onChange={(event) =>
-                setEmailAttentionFilter(event.target.value as EmailAttentionFilter)
+                changeFilter(
+                  setEmailAttentionFilter,
+                  event.target.value as EmailAttentionFilter,
+                )
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1620,7 +1806,7 @@ export function AdminEntriesManager({
             <select
               value={testEntryFilter}
               onChange={(event) =>
-                setTestEntryFilter(event.target.value as TestEntryFilter)
+                changeFilter(setTestEntryFilter, event.target.value as TestEntryFilter)
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1634,7 +1820,7 @@ export function AdminEntriesManager({
             <select
               value={overdueFilter}
               onChange={(event) =>
-                setOverdueFilter(event.target.value as OverdueFilter)
+                changeFilter(setOverdueFilter, event.target.value as OverdueFilter)
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1647,7 +1833,10 @@ export function AdminEntriesManager({
             <select
               value={paymentStatusFilter}
               onChange={(event) =>
-                setPaymentStatusFilter(event.target.value as PaymentStatusFilter)
+                changeFilter(
+                  setPaymentStatusFilter,
+                  event.target.value as PaymentStatusFilter,
+                )
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1662,7 +1851,10 @@ export function AdminEntriesManager({
             <select
               value={receptionStatusFilter}
               onChange={(event) =>
-                setReceptionStatusFilter(event.target.value as ReceptionStatusFilter)
+                changeFilter(
+                  setReceptionStatusFilter,
+                  event.target.value as ReceptionStatusFilter,
+                )
               }
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
@@ -1778,12 +1970,12 @@ export function AdminEntriesManager({
           </label>
         </div>
 
-        <div className="mt-3 grid gap-3 lg:grid-cols-[220px_1fr]">
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-[220px_160px_1fr]">
           <label className="space-y-2">
             <span className="text-xs font-semibold text-zinc-400">大会</span>
             <select
               value={eventFilter}
-              onChange={(event) => setEventFilter(event.target.value)}
+              onChange={(event) => changeFilter(setEventFilter, event.target.value)}
               className="h-11 w-full rounded-md border border-white/10 bg-black px-3 text-sm text-white outline-none focus:border-alma-gold"
             >
               <option value="all">すべて</option>
@@ -1794,7 +1986,24 @@ export function AdminEntriesManager({
               ))}
             </select>
           </label>
-          <div className="space-y-2">
+          <label className="space-y-2">
+            <span className="text-xs font-semibold text-zinc-400">性別</span>
+            <select
+              value={genderFilter}
+              onChange={(event) =>
+                changeFilter(setGenderFilter, event.target.value as GenderFilter)
+              }
+              className={filterSelectClassName}
+            >
+              <option value="all">すべて</option>
+              {ATHLETE_GENDERS.map((gender) => (
+                <option key={gender} value={gender}>
+                  {ATHLETE_GENDER_LABELS[gender]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="space-y-2 sm:col-span-2 lg:col-span-1">
             <span className="text-xs font-semibold text-zinc-400">表示</span>
             <div className="grid min-h-11 grid-cols-2 overflow-hidden rounded-md border border-white/10 bg-black p-1">
               <button
@@ -1833,6 +2042,12 @@ export function AdminEntriesManager({
               <span className="ml-2 text-xs text-zinc-500">
                 表示中 {visibleSelectedCount}/{visibleEntries.length}名
               </span>
+            ) : null}
+            {hiddenSelectedCount > 0 ? (
+              <p className="mt-1 text-xs text-amber-300">
+                選択中のうち {hiddenSelectedCount}
+                名は、選択後に状態が変わったため現在の一覧に表示されていません。一括メール・テスト申込の操作の対象に含まれます。不要な場合は「全解除」してください。
+              </p>
             ) : null}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -2003,6 +2218,13 @@ export function AdminEntriesManager({
                       </div>
                       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
                         <div className="sm:col-span-3">
+                          <dt className="text-xs text-zinc-500">種別 / 性別</dt>
+                          <dd className="mt-1 text-zinc-200">
+                            {entryTypeLabels[entry.entryType]} /{" "}
+                            {getAthleteGenderLabel(entry.gender)}
+                          </dd>
+                        </div>
+                        <div className="sm:col-span-3">
                           <dt className="text-xs text-zinc-500">出場内容</dt>
                           <dd className="mt-1 text-zinc-200">
                             <EntryDivisionLines entry={entry} />
@@ -2061,7 +2283,7 @@ export function AdminEntriesManager({
                         <th className="px-4 py-3 font-semibold">選択</th>
                         <th className="px-4 py-3 font-semibold">氏名</th>
                         <th className="px-4 py-3 font-semibold">大会</th>
-                        <th className="px-4 py-3 font-semibold">種別</th>
+                        <th className="px-4 py-3 font-semibold">種別 / 性別</th>
                         <th className="px-4 py-3 font-semibold">出場内容</th>
                         <th className="px-4 py-3 font-semibold">支払</th>
                         <th className="px-4 py-3 font-semibold">受付</th>
@@ -2100,7 +2322,10 @@ export function AdminEntriesManager({
                             {entry.eventTitle}
                           </td>
                           <td className="px-4 py-4 text-zinc-300">
-                            {entryTypeLabels[entry.entryType]}
+                            <p>{entryTypeLabels[entry.entryType]}</p>
+                            <p className="mt-1 text-xs text-zinc-400">
+                              {getAthleteGenderLabel(entry.gender)}
+                            </p>
                           </td>
                           <td className="px-4 py-4 text-zinc-300">
                             <EntryDivisionLines entry={entry} />
@@ -2200,7 +2425,7 @@ export function AdminEntriesManager({
                     <dt className="text-xs text-zinc-500">種別 / 性別</dt>
                     <dd className="mt-1 text-zinc-200">
                       {entryTypeLabels[entry.entryType]} /{" "}
-                      {getGenderLabel(entry.gender) || "-"}
+                      {getAthleteGenderLabel(entry.gender)}
                     </dd>
                   </div>
                   <div>
@@ -2276,7 +2501,7 @@ export function AdminEntriesManager({
                     </th>
                     <th className="px-4 py-3 font-semibold">氏名</th>
                     <th className="px-4 py-3 font-semibold">大会</th>
-                    <th className="px-4 py-3 font-semibold">種別</th>
+                    <th className="px-4 py-3 font-semibold">種別 / 性別</th>
                     <th className="px-4 py-3 font-semibold">出場内容</th>
                     <th className="px-4 py-3 font-semibold">支払</th>
                     <th className="px-4 py-3 font-semibold">受付</th>
@@ -2310,7 +2535,10 @@ export function AdminEntriesManager({
                       </td>
                       <td className="px-4 py-4 text-zinc-300">{entry.eventTitle}</td>
                       <td className="px-4 py-4 text-zinc-300">
-                        {entryTypeLabels[entry.entryType]}
+                        <p>{entryTypeLabels[entry.entryType]}</p>
+                        <p className="mt-1 text-xs text-zinc-400">
+                          {getAthleteGenderLabel(entry.gender)}
+                        </p>
                       </td>
                       <td className="px-4 py-4 text-zinc-300">
                         <EntryDivisionLines entry={entry} />
@@ -2468,10 +2696,14 @@ export function AdminEntriesManager({
               <div>
                 <p className="text-sm font-semibold text-alma-gold">一括メール</p>
                 <h2 className="mt-2 text-lg font-bold text-white">
-                  選択中 {selectedEntries.length}名
+                  送信先 {bulkMailRecipients.length}件
                 </h2>
                 <p className="mt-1 text-sm text-zinc-400">
-                  選択した選手に同じ内容のメールを送信します。
+                  選択中の選手 {selectedEntries.length}名・申込{" "}
+                  {bulkMailApplicationCount}
+                  件。メールは選手ではなく申込者のメールアドレスに、申込ごとに 1
+                  通送信します（代表者申込は代表者に届きます。同じメールアドレスの申込は
+                  1 通にまとめます）。
                 </p>
               </div>
               <button
@@ -2490,14 +2722,10 @@ export function AdminEntriesManager({
               </div>
             ) : null}
 
-            <div className="mt-5 max-h-28 overflow-y-auto rounded-md border border-white/10 bg-black px-3 py-2 text-sm text-zinc-300">
-              {selectedEntries.map((entry) => (
-                <div key={entry.id} className="flex justify-between gap-3 py-1">
-                  <span className="font-semibold text-white">{entry.name}</span>
-                  <span className="break-all text-xs text-zinc-500">{entry.email}</span>
-                </div>
-              ))}
-            </div>
+            <BulkMailRecipientList
+              recipients={bulkMailRecipients}
+              getAthletes={getSelectionAthletes}
+            />
 
             <div className="mt-5 space-y-4">
               <label className="block space-y-2">
@@ -2552,6 +2780,7 @@ export function AdminEntriesManager({
         <TestEntryActionDialog
           action={testEntryDialog.action}
           targets={testEntryDialog.targets}
+          getAthletes={getSelectionAthletes}
           results={testEntryDialog.results}
           isRunning={isRunningTestAction}
           onConfirm={() => void runTestEntryAction()}
@@ -2564,8 +2793,15 @@ export function AdminEntriesManager({
           <div className="w-full max-w-md rounded-lg border border-alma-gold/40 bg-zinc-950 p-5 shadow-2xl shadow-black">
             <p className="text-sm font-semibold text-alma-gold">送信確認</p>
             <h2 className="mt-2 text-lg font-bold text-white">
-              {selectedEntries.length}名に一括メールを送信します
+              {bulkMailRecipients.length}件の宛先に一括メールを送信します
             </h2>
+            <p className="mt-2 text-sm text-zinc-300">
+              選択中の選手 {selectedEntries.length}名・申込 {bulkMailApplicationCount}件
+            </p>
+            <BulkMailRecipientList
+              recipients={bulkMailRecipients}
+              getAthletes={getSelectionAthletes}
+            />
             <p className="mt-3 text-sm leading-6 text-zinc-400">
               送信後は各宛先ごとにメール履歴へ「一括メール」として保存されます。
             </p>
