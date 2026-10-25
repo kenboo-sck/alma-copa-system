@@ -208,9 +208,7 @@ export function formatDateTime(value: Date | null) {
   }).format(value);
 }
 
-export function getEntryState(event: PublicEvent) {
-  const now = new Date();
-
+export function getEntryState(event: PublicEvent, now = new Date()) {
   if (event.status === "closed") {
     return { label: "受付終了", canEnter: false };
   }
